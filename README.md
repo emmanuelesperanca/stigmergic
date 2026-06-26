@@ -37,3 +37,28 @@ You don't need a heavy vector database to understand Stigmergy. Let's run a swar
 ```bash
 pip install -r requirements.txt
 python examples/01_hello_stigmergy.py
+```
+
+### What happens?
+1. The **Forager Ant** injects chaotic, high-entropy requests into the DB (e.g., `"update salary to 15k urgent"`).
+2. The **Governance Ant** smells entropy `> 0.7`. It wakes up asynchronously, sanitizes the payload, lowers the entropy to `0.2`, and leaves a chemical trail (`HYGIENIZED`).
+3. The **Solver Ant** smells the clean trail, executes the safe business logic, and zeroes the entropy.
+
+**The Magic:** Kill the Governance Ant thread mid-execution. The system doesn't crash. The Forager keeps adding tasks, the Solver ignores them (waiting for hygiene). Restart the Governance Ant, and watch it vacuum the backlog at lightning speed. *Absolute eventual consistency without Step Functions.*
+
+---
+
+## 🏗️ Why not LangChain/CrewAI?
+
+| Feature | Commercial Orchestrators | StigmergicAI |
+| :--- | :--- | :--- |
+| **Topology** | Centralized (Supervisor/Nodes) | Decentralized (Stigmergy) |
+| **Communication** | String-based RPC (Lossy) | Tensor/Latent Injection |
+| **Fault Tolerance** | Try/Catch Retries | Semantic Byzantine Quorum |
+| **State Persistence** | App Memory (Volatile) | Database Physics (Durable) |
+
+## 🤝 Contributing
+This is an experimental research project pushing the boundaries of Distributed Cognitive Systems. We welcome PRs for new Byzantine voting mechanisms, OpenSearch integrations, and Latent Transfer utilities.
+
+## 📄 License
+Apache License 2.0. See `LICENSE` for more information.
