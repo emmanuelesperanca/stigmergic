@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stigmergic-ai"
+version = "0.1.0"
+description = "A zero-dependency, mathematically secure multi-agent framework based on Stigmergy, Latent State Transfer, and Byzantine Fault Tolerance."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "StigmergicAI Contributors" }]
+keywords = [
+    "multi-agent",
+    "stigmergy",
+    "swarm-intelligence",
+    "byzantine-fault-tolerance",
+    "latent-state-transfer",
+    "eventual-consistency",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+# Horizon 1 (Stigmergic Swarms) relies only on the standard library plus
+# pydantic. The heavy cognitive horizons are opt-in via extras so that
+# `import stigmergic_ai` never pays the torch/transformers import tax.
+dependencies = [
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+# Horizon 2 (Byzantine Cognitive Consensus) and Horizon 3 (Latent State
+# Transfer) require the deep-learning stack. Install with:
+#   pip install -e ".[cognition]"
+cognition = [
+    "torch>=2.0",
+    "transformers>=4.40",
+]
+dev = [
+    "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/stigmergic-ai/stigmergic-ai"
+Repository = "https://github.com/stigmergic-ai/stigmergic-ai"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

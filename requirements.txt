@@ -1,0 +1,27 @@
+# StigmergicAI -- core runtime dependencies
+# ==========================================
+# Horizon 1 (Stigmergic Swarms) is intentionally near-zero-dependency. The only
+# hard requirement is pydantic; everything else in the core rides on the Python
+# standard library (sqlite3, threading, json). Importing `stigmergic_ai` never
+# pulls torch or transformers, so this base install stays tiny and fast.
+
+pydantic>=2.0
+
+# --- Optional: the [cognition] extra (Horizons 2 & 3) ----------------------
+# The Byzantine Cognitive Consensus (Semantic Raft) and Latent State Transfer
+# horizons need the deep-learning stack. It is deliberately OPT-IN so the core
+# footprint stays minimal. Install it in either of two ways:
+#
+#   1. Via the packaged extra (preferred -- keeps versions in one place):
+#        pip install -e ".[cognition]"
+#
+#   2. Or uncomment the two pins below and run:
+#        pip install -r requirements.txt
+#
+# torch>=2.0
+# transformers>=4.40
+
+# --- Optional: developer tooling -------------------------------------------
+# For the test suite (tests/test_consensus.py runs torch-free via MockNLIJudge):
+#
+# pytest>=7.0

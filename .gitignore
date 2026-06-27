@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- StigmergicAI ----------------------------------------------------------
+# Local Pheromone Ground databases. PheromoneGround runs SQLite in WAL mode, so
+# a file-backed ground leaves behind the .db plus its -wal/-shm sidecars. These
+# are runtime swarm state, not source -- keep them out of version control.
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.sqlite-wal
+*.sqlite-shm
+swarm.db
