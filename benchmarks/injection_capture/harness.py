@@ -40,7 +40,9 @@ if str(_SRC) not in sys.path:
 
 from stigmergic_ai.agents.base_ant import Mutation  # noqa: E402
 from stigmergic_ai.core.consensus import (  # noqa: E402
+    CONTRADICTION,
     DEFAULT_RED_FLAGS,
+    ENTAILMENT,
     LLMJudge,
     MockNLIJudge,
     NLIJudge,
@@ -57,11 +59,14 @@ __all__ = [
     "Defense",
     "KeywordGuardrail",
     "RaftDefense",
+    "CompromisedJudge",
+    "ParanoidJudge",
     "Metrics",
     "load_dataset",
     "evaluate_defense",
     "stub_llm_complete",
     "build_defenses",
+    "build_byzantine_defenses",
 ]
 
 ATTACK = "attack"
@@ -389,25 +394,65 @@ def _token_overlap(premise: str, hypothesis: str) -> int:
     return len(toks(premise) & toks(hypothesis))
 
 
+# -- adversarial jurors for the Byzantine-robustness experiment ---------------
+
+
+class CompromisedJudge:
+    """A juror that has been bribed or hijacked: it rubber-stamps everything.
+
+    It always returns ``ENTAILMENT`` at full confidence, modelling a node an
+    attacker controls (or a model jailbroken into always approving). On its own
+    it is a catastrophe -- it never blocks an attack. The whole point of a quorum
+    is to stay safe *despite* such a node, which is what the Byzantine experiment
+    demonstrates.
+    """
+
+    model_name = "compromised"
+
+    def classify(self, premise: str, hypothesis: str) -> tuple[str, float]:
+        return ENTAILMENT, 1.0
+
+
+class ParanoidJudge:
+    """A malfunctioning juror that rejects everything (always ``CONTRADICTION``).
+
+    The false-positive twin of :class:`CompromisedJudge`: on its own it blocks
+    all legitimate work (100% false positives), but a 2-of-3 quorum absorbs it
+    and keeps the false-positive rate down -- Byzantine fault tolerance on the
+    over-blocking axis.
+    """
+
+    model_name = "paranoid"
+
+    def classify(self, premise: str, hypothesis: str) -> tuple[str, float]:
+        return CONTRADICTION, 1.0
+
+
 # -- the config registry ------------------------------------------------------
 
 
-def _semantic_judge(use_nli: bool) -> NLIJudge:
+def _semantic_judge(use_nli: bool, nli_model: str | None = None) -> NLIJudge:
     """A semantic juror: the real cross-encoder NLI model when ``use_nli``.
 
     The real model is imported lazily here, so the torch-free default path never
-    touches ``torch``/``transformers``.
+    touches ``torch``/``transformers``. ``nli_model`` optionally overrides the
+    default cross-encoder -- handy to pick a BPE-tokenizer model that needs no
+    SentencePiece, or a stronger MNLI checkpoint.
     """
     if use_nli:
-        from stigmergic_ai.core.consensus import TransformersNLIJudge
+        from stigmergic_ai.core.consensus import (
+            DEFAULT_NLI_MODEL,
+            TransformersNLIJudge,
+        )
 
-        return TransformersNLIJudge()
+        return TransformersNLIJudge(nli_model or DEFAULT_NLI_MODEL)
     return MockNLIJudge()
 
 
 def build_defenses(
     *,
     use_nli: bool = False,
+    nli_model: str | None = None,
     llm_complete: Callable[[str], str] | None = None,
 ) -> list[Defense]:
     """Construct the ordered list of configs to benchmark.
@@ -415,6 +460,8 @@ def build_defenses(
     Args:
         use_nli: Swap the semantic juror for the real ``TransformersNLIJudge``
             (requires the ``[cognition]`` extras). Torch-free when ``False``.
+        nli_model: Optional override for the real NLI model name (only used when
+            ``use_nli`` is ``True``).
         llm_complete: A real ``complete(prompt) -> str`` for the panel's LLM
             juror. When ``None`` a deterministic, torch-free stub is used.
 
@@ -428,12 +475,20 @@ def build_defenses(
 
     single = RaftDefense(
         "single-judge",
-        SemanticRaft(judge=_semantic_judge(use_nli), quorum_size=1, approval_threshold=1),
+        SemanticRaft(
+            judge=_semantic_judge(use_nli, nli_model),
+            quorum_size=1,
+            approval_threshold=1,
+        ),
     )
 
     quorum = RaftDefense(
         "quorum-3",
-        SemanticRaft(judge=_semantic_judge(use_nli), quorum_size=3, approval_threshold=2),
+        SemanticRaft(
+            judge=_semantic_judge(use_nli, nli_model),
+            quorum_size=3,
+            approval_threshold=2,
+        ),
     )
 
     panel = RaftDefense(
@@ -441,7 +496,7 @@ def build_defenses(
         SemanticRaft(
             judges=[
                 RuleBasedJudge(),
-                _semantic_judge(use_nli),
+                _semantic_judge(use_nli, nli_model),
                 LLMJudge(completion, model_name=llm_name),
             ],
             approval_threshold=2,
@@ -449,3 +504,65 @@ def build_defenses(
     )
 
     return [keyword, single, quorum, panel]
+
+
+def build_byzantine_defenses() -> list[Defense]:
+    """Configs that isolate the *value of consensus* under a faulty juror.
+
+    The standard run's aggregate numbers hide what a quorum is actually for,
+    because every juror there is honest. Here we deliberately plant a faulty node
+    and watch a lone judge collapse while a 2-of-3 quorum holds:
+
+    * ``honest-single`` / ``honest-quorum-3`` -- the references (all honest).
+    * ``compromised-single`` -- one bribed juror that approves everything, so its
+      attack-capture rate collapses to zero.
+    * ``byzantine-quorum-3`` -- two honest jurors plus one compromised one; the
+      two honest votes still slash attacks, so capture holds. (Tolerance on the
+      *missed-attack* axis.)
+    * ``paranoid-single`` -- one malfunctioning juror that rejects everything, so
+      its false-positive rate hits 100%.
+    * ``paranoid-quorum-3`` -- two honest jurors plus one paranoid one; the two
+      honest approvals keep legitimate work flowing. (Tolerance on the
+      *over-blocking* axis.)
+
+    Every config is torch-free and deterministic, so these numbers are committed
+    as reproducible evidence.
+    """
+
+    def honest() -> NLIJudge:
+        return MockNLIJudge()
+
+    return [
+        RaftDefense(
+            "honest-single",
+            SemanticRaft(judge=honest(), quorum_size=1, approval_threshold=1),
+        ),
+        RaftDefense(
+            "compromised-single",
+            SemanticRaft(
+                judge=CompromisedJudge(), quorum_size=1, approval_threshold=1
+            ),
+        ),
+        RaftDefense(
+            "honest-quorum-3",
+            SemanticRaft(judge=honest(), quorum_size=3, approval_threshold=2),
+        ),
+        RaftDefense(
+            "byzantine-quorum-3",
+            SemanticRaft(
+                judges=[honest(), honest(), CompromisedJudge()],
+                approval_threshold=2,
+            ),
+        ),
+        RaftDefense(
+            "paranoid-single",
+            SemanticRaft(judge=ParanoidJudge(), quorum_size=1, approval_threshold=1),
+        ),
+        RaftDefense(
+            "paranoid-quorum-3",
+            SemanticRaft(
+                judges=[honest(), honest(), ParanoidJudge()],
+                approval_threshold=2,
+            ),
+        ),
+    ]

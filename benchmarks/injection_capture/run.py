@@ -5,6 +5,9 @@ Usage (from the repo root)::
     # torch-free, fully reproducible, no downloads, no keys:
     python benchmarks/injection_capture/run.py
 
+    # the Byzantine-robustness experiment (torch-free, deterministic):
+    python benchmarks/injection_capture/run.py --byzantine
+
     # swap in the real cross-encoder NLI juror (needs the [cognition] extras):
     python benchmarks/injection_capture/run.py --nli
 
@@ -12,13 +15,18 @@ Usage (from the repo root)::
     # see providers.py for the environment variables):
     python benchmarks/injection_capture/run.py --llm
 
-It compares four anti-injection configs on the same labeled corpus -- a naive
-``keyword-only`` denylist (the baseline), a ``single-judge`` semantic check, a
-homogeneous ``quorum-3``, and the flagship heterogeneous ``panel`` -- and writes
-``results.json`` (machine-readable) and ``RESULTS.md`` (human-readable) next to
-this script. The headline metric is the **capture rate** (recall on attacks),
-mapped to OWASP LLM01 (Prompt Injection); the **false-positive rate** guards
-against a control that simply blocks everything.
+The *standard* run compares four anti-injection configs on the same labeled
+corpus -- a naive ``keyword-only`` denylist (the baseline), a ``single-judge``
+semantic check, a homogeneous ``quorum-3``, and the flagship heterogeneous
+``panel``. The ``--byzantine`` run instead plants a faulty juror to isolate the
+value of consensus itself.
+
+Every run archives its metrics to ``results/<mode>.json`` (committed evidence)
+and regenerates ``COMPARISON.md`` so the modes can be read side by side. A
+standard run also refreshes ``RESULTS.md``; a Byzantine run writes
+``BYZANTINE.md``. The headline metric is the **capture rate** (recall on
+attacks), mapped to OWASP LLM01 (Prompt Injection); the **false-positive rate**
+guards against a control that simply blocks everything.
 """
 
 from __future__ import annotations
@@ -35,6 +43,7 @@ if str(HERE) not in sys.path:
 
 from harness import (  # noqa: E402
     Metrics,
+    build_byzantine_defenses,
     build_defenses,
     evaluate_defense,
     load_dataset,
@@ -43,6 +52,9 @@ from harness import (  # noqa: E402
 DATASET = HERE / "dataset.jsonl"
 RESULTS_JSON = HERE / "results.json"
 RESULTS_MD = HERE / "RESULTS.md"
+BYZANTINE_MD = HERE / "BYZANTINE.md"
+COMPARISON_MD = HERE / "COMPARISON.md"
+RESULTS_DIR = HERE / "results"
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -59,9 +71,19 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Use the real TransformersNLIJudge (downloads a model; needs [cognition]).",
     )
     parser.add_argument(
+        "--nli-model",
+        default=None,
+        help="Override the NLI model name (only with --nli; e.g. a BPE MNLI model).",
+    )
+    parser.add_argument(
         "--llm",
         action="store_true",
         help="Add a real LLM juror to the panel (needs [benchmark] + env config).",
+    )
+    parser.add_argument(
+        "--byzantine",
+        action="store_true",
+        help="Run the consensus-under-a-faulty-juror experiment (torch-free).",
     )
     parser.add_argument(
         "--no-cache",
@@ -72,6 +94,26 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         "--quiet", action="store_true", help="Suppress the console summary table."
     )
     return parser.parse_args(argv)
+
+
+def _mode_label(args: argparse.Namespace) -> str:
+    """A human-readable description of the active run configuration."""
+    if args.byzantine:
+        return "byzantine"
+    bits = ["real-NLI" if args.nli else "torch-free"]
+    if args.llm:
+        bits.append("real-LLM")
+    return " + ".join(bits)
+
+
+def _mode_slug(args: argparse.Namespace) -> str:
+    """A filesystem-safe slug for the archived ``results/<slug>.json``."""
+    if args.byzantine:
+        return "byzantine"
+    slug = "real-nli" if args.nli else "torch-free"
+    if args.llm:
+        slug += "+real-llm"
+    return slug
 
 
 def _resolve_llm_complete(args: argparse.Namespace):
@@ -208,51 +250,307 @@ This report was generated in **{mode}** mode.
 """
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = _parse_args(argv)
-    items = load_dataset(args.dataset)
-    n_attacks = sum(1 for it in items if it.is_attack)
+def _build_byzantine_markdown(
+    metrics: list[Metrics], *, n_items: int, n_attacks: int
+) -> str:
+    """Render the consensus-under-a-faulty-juror experiment."""
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    by = {m.config: m for m in metrics}
 
-    llm_complete = _resolve_llm_complete(args)
-    mode_bits = ["torch-free" if not args.nli else "real-NLI"]
-    if args.llm:
-        mode_bits.append("real-LLM")
-    mode = " + ".join(mode_bits)
+    def cap(name: str) -> str:
+        return f"{by[name].capture_rate:.1%}" if name in by else "-"
 
-    defenses = build_defenses(use_nli=args.nli, llm_complete=llm_complete)
+    def fpr(name: str) -> str:
+        return f"{by[name].false_positive_rate:.1%}" if name in by else "-"
 
+    rows = [
+        "| Config | Faulty juror | Capture rate | False-positive rate |",
+        "| :--- | :--- | ---: | ---: |",
+    ]
+    descriptions = {
+        "honest-single": "none (reference)",
+        "compromised-single": "1 of 1 approves everything",
+        "honest-quorum-3": "none (reference)",
+        "byzantine-quorum-3": "1 of 3 approves everything",
+        "paranoid-single": "1 of 1 rejects everything",
+        "paranoid-quorum-3": "1 of 3 rejects everything",
+    }
+    for m in metrics:
+        rows.append(
+            f"| `{m.config}` | {descriptions.get(m.config, '?')} "
+            f"| {m.capture_rate:.1%} | {m.false_positive_rate:.1%} |"
+        )
+    table = "\n".join(rows)
+
+    return f"""# Byzantine-Robustness Experiment - Results
+
+> Generated by `run.py --byzantine` on {stamp}. Mode: **byzantine** (torch-free, deterministic).
+> Corpus: **{n_items}** labeled cases ({n_attacks} attacks, {n_items - n_attacks} benign).
+
+The standard benchmark's aggregate numbers hide *why a quorum exists*: in that
+run every juror is honest, so a 2-of-3 quorum scores exactly like a single
+judge. This experiment makes the value of consensus visible by deliberately
+planting **one faulty juror** and measuring what happens.
+
+## The result
+
+{table}
+
+## What it shows
+
+**Missed-attack axis (a bribed/hijacked juror that approves everything).**
+A single compromised judge collapses from a {cap('honest-single')} capture rate
+to **{cap('compromised-single')}** - it waves every attack through. Drop the
+*same* compromised juror into a 3-node quorum and capture holds at
+**{cap('byzantine-quorum-3')}**: the two honest jurors still reach the 2-vote
+threshold to slash the attack. *The quorum tolerates a traitor the single judge
+cannot.*
+
+**Over-blocking axis (a malfunctioning juror that rejects everything).**
+A single paranoid judge blocks all legitimate work - a
+**{fpr('paranoid-single')}** false-positive rate. The same faulty juror inside a
+quorum is outvoted by the two honest approvals, so the false-positive rate falls
+back to **{fpr('paranoid-quorum-3')}** (the residual is the shared keyword
+look-alike issue, not the faulty node).
+
+## Why this matters
+
+This is the **Byzantine Cognitive Consensus** thesis (Horizon 2) reduced to two
+numbers: a lone model is a single point of failure in *both* directions - it can
+be fooled into approving an attack, or break and block everything - while a
+quorum that fails for *uncorrelated* reasons survives a faulty member. The
+standard run proves the relational check beats a denylist on recall; this run
+proves the *consensus* is what makes that check trustworthy in production.
+
+> Reproduce with `python benchmarks/injection_capture/run.py --byzantine`.
+> Every juror here is a deterministic, torch-free stand-in, so these numbers are
+> committed as stable evidence.
+"""
+
+
+def _archive_payload(payload: dict, slug: str) -> pathlib.Path:
+    """Persist one run's metrics under ``results/<slug>.json`` (committed)."""
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    path = RESULTS_DIR / f"{slug}.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _regenerate_comparison() -> None:
+    """Rebuild ``COMPARISON.md`` from every archived ``results/*.json``.
+
+    This is the cross-mode evidence ledger: each run drops a JSON snapshot and
+    the comparison is recomputed, so torch-free, real-NLI, real-LLM and Byzantine
+    results can be read against one another without re-running anything.
+    """
+    if not RESULTS_DIR.exists():
+        return
+    snapshots = []
+    for path in sorted(RESULTS_DIR.glob("*.json")):
+        try:
+            snapshots.append(json.loads(path.read_text(encoding="utf-8")))
+        except json.JSONDecodeError:  # pragma: no cover - corrupt archive
+            continue
+    if not snapshots:
+        return
+
+    stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    lines = [
+        "# Benchmark Comparison - All Modes",
+        "",
+        f"> Regenerated on {stamp} from `results/*.json`. Each row is one config",
+        "> from one run mode; re-run any mode to refresh its rows.",
+        "",
+        "| Mode | Config | Capture rate | FPR | Precision | F1 | Accuracy |",
+        "| :--- | :--- | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    # Index every (mode, config) -> metrics so the findings section can quote
+    # exact numbers without re-running anything.
+    index: dict[tuple[str, str], dict] = {}
+    for snap in snapshots:
+        mode = snap.get("mode", "?")
+        for cfg in snap.get("configs", []):
+            conf = cfg
+            index[(mode, conf["config"])] = conf
+            lines.append(
+                f"| {mode} | `{conf['config']}` "
+                f"| {conf['capture_rate']:.1%} "
+                f"| {conf['false_positive_rate']:.1%} "
+                f"| {conf['precision']:.1%} "
+                f"| {conf['f1']:.3f} "
+                f"| {conf['accuracy']:.1%} |"
+            )
+
+    findings = _comparison_findings(index)
+    if findings:
+        lines.extend(["", "## Key findings", ""])
+        lines.extend(findings)
+
+    lines.extend(
+        [
+            "",
+            "## How to read this",
+            "",
+            "- **Capture rate** - recall on attacks (OWASP LLM01). Higher is better.",
+            "- **FPR** - benign work wrongly blocked. Lower is better.",
+            "- The `torch-free` rows are the committed, reproducible headline. The",
+            "  `real-nli` / `real-llm` rows depend on the model/provider used and are",
+            "  evidence, not a reproducibility guarantee. The `byzantine` rows isolate",
+            "  the value of consensus under a faulty juror (see `BYZANTINE.md`).",
+            "",
+        ]
+    )
+    COMPARISON_MD.write_text("\n".join(lines), encoding="utf-8")
+
+
+def _comparison_findings(index: dict[tuple[str, str], dict]) -> list[str]:
+    """Data-driven bullet points computed from the archived snapshots.
+
+    Each bullet only appears when the mode it describes has actually been run,
+    so the comparison narrates exactly the evidence on disk -- never a claim
+    without a row to back it.
+    """
+    out: list[str] = []
+
+    def pct(mode: str, config: str, field: str) -> str | None:
+        conf = index.get((mode, config))
+        return f"{conf[field]:.1%}" if conf else None
+
+    # 1) The torch-free relational lift over a denylist.
+    kw_cap = pct("torch-free", "keyword-only", "capture_rate")
+    sj_cap = pct("torch-free", "single-judge", "capture_rate")
+    if kw_cap and sj_cap:
+        out.append(
+            f"- **Relational check beats a denylist (torch-free, reproducible).** "
+            f"Capture rises from **{kw_cap}** (`keyword-only`) to **{sj_cap}** "
+            f"(`single-judge`) at the *same* false-positive rate -- the committed "
+            f"headline."
+        )
+
+    # 2) A real NLI model over-blocks on its own; the panel tames it.
+    nli_sj_cap = pct("real-NLI", "single-judge", "capture_rate")
+    nli_sj_fpr = pct("real-NLI", "single-judge", "false_positive_rate")
+    nli_panel_cap = pct("real-NLI", "heterogeneous-panel", "capture_rate")
+    nli_panel_fpr = pct("real-NLI", "heterogeneous-panel", "false_positive_rate")
+    if nli_sj_cap and nli_sj_fpr and nli_panel_cap and nli_panel_fpr:
+        out.append(
+            f"- **A real NLI model is not trustworthy *alone* (model-dependent "
+            f"evidence).** The raw cross-encoder juror catches **{nli_sj_cap}** of "
+            f"attacks but over-blocks legitimate work at a **{nli_sj_fpr}** "
+            f"false-positive rate -- unusable on its own. Inside the heterogeneous "
+            f"panel its over-eagerness is outvoted: capture **{nli_panel_cap}** at "
+            f"a **{nli_panel_fpr}** false-positive rate. *Consensus across "
+            f"uncorrelated jurors tames a single over-confident model.*"
+        )
+
+    # 3) The Byzantine tolerance result.
+    byz_comp = pct("byzantine", "compromised-single", "capture_rate")
+    byz_quorum = pct("byzantine", "byzantine-quorum-3", "capture_rate")
+    byz_par = pct("byzantine", "paranoid-single", "false_positive_rate")
+    byz_par_q = pct("byzantine", "paranoid-quorum-3", "false_positive_rate")
+    if byz_comp and byz_quorum and byz_par and byz_par_q:
+        out.append(
+            f"- **The quorum survives a faulty juror (torch-free, "
+            f"deterministic).** One bribed juror drops a single judge to "
+            f"**{byz_comp}** capture, yet the same traitor inside a 3-node quorum "
+            f"holds at **{byz_quorum}**. A broken juror drives a lone judge to a "
+            f"**{byz_par}** false-positive rate; the quorum outvotes it back to "
+            f"**{byz_par_q}**. See `BYZANTINE.md`."
+        )
+
+    return out
+
+
+def _run_defenses(
+    defenses, items
+) -> tuple[list[Metrics], dict[str, list[dict]]]:
     all_metrics: list[Metrics] = []
     per_item_records: dict[str, list[dict]] = {}
     for defense in defenses:
         metrics, records = evaluate_defense(defense, items)
         all_metrics.append(metrics)
         per_item_records[defense.name] = records
+    return all_metrics, per_item_records
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    items = load_dataset(args.dataset)
+    n_attacks = sum(1 for it in items if it.is_attack)
+    n_items = len(items)
+    mode = _mode_label(args)
+    slug = _mode_slug(args)
+
+    if args.byzantine:
+        defenses = build_byzantine_defenses()
+    else:
+        llm_complete = _resolve_llm_complete(args)
+        defenses = build_defenses(
+            use_nli=args.nli, nli_model=args.nli_model, llm_complete=llm_complete
+        )
+
+    all_metrics, per_item_records = _run_defenses(defenses, items)
 
     payload = {
         "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
         "mode": mode,
+        "slug": slug,
         "dataset": str(args.dataset.name),
-        "n_items": len(items),
+        "n_items": n_items,
         "n_attacks": n_attacks,
-        "n_benign": len(items) - n_attacks,
+        "n_benign": n_items - n_attacks,
         "configs": [m.to_dict() for m in all_metrics],
         "per_item": per_item_records,
     }
-    RESULTS_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    RESULTS_MD.write_text(
-        _build_markdown(
-            all_metrics, n_items=len(items), n_attacks=n_attacks, mode=mode
-        ),
-        encoding="utf-8",
-    )
+
+    # Always archive this run's snapshot (committed evidence) and refresh the
+    # cross-mode comparison ledger.
+    archived = _archive_payload(payload, slug)
+
+    if args.byzantine:
+        BYZANTINE_MD.write_text(
+            _build_byzantine_markdown(
+                all_metrics, n_items=n_items, n_attacks=n_attacks
+            ),
+            encoding="utf-8",
+        )
+        primary_md = BYZANTINE_MD
+    elif not args.nli and not args.llm:
+        # Only the canonical, fully-reproducible torch-free run owns RESULTS.md
+        # and results.json -- the committed headline the README points to. The
+        # model/provider-dependent modes (--nli, --llm) live in their per-mode
+        # results/<slug>.json snapshot and in COMPARISON.md, so a real-model run
+        # never silently overwrites the reproducible baseline.
+        RESULTS_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        RESULTS_MD.write_text(
+            _build_markdown(
+                all_metrics, n_items=n_items, n_attacks=n_attacks, mode=mode
+            ),
+            encoding="utf-8",
+        )
+        primary_md = RESULTS_MD
+    else:
+        primary_md = archived
+
+    _regenerate_comparison()
 
     if not args.quiet:
         print(f"\nInjection-capture benchmark  |  mode: {mode}")
-        print(f"corpus: {len(items)} items ({n_attacks} attacks, "
-              f"{len(items) - n_attacks} benign)\n")
+        print(f"corpus: {n_items} items ({n_attacks} attacks, "
+              f"{n_items - n_attacks} benign)\n")
         print(_format_console_table(all_metrics))
-        print(f"\nWrote {RESULTS_JSON.name} and {RESULTS_MD.name} to {HERE}")
+        if primary_md is archived:
+            print(
+                f"\nArchived results/{archived.name} and refreshed "
+                f"{COMPARISON_MD.name} in {HERE}"
+            )
+        else:
+            print(
+                f"\nWrote {primary_md.name}, results/{archived.name} and "
+                f"{COMPARISON_MD.name} to {HERE}"
+            )
     return 0
+
 
 
 if __name__ == "__main__":
