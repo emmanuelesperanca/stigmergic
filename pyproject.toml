@@ -45,6 +45,12 @@ cognition = [
     "torch>=2.0",
     "transformers>=4.40",
 ]
+# A production Pheromone Ground on PostgreSQL (lock-free SKIP LOCKED claims and
+# LISTEN/NOTIFY push). Install with:
+#   pip install -e ".[postgres]"
+postgres = [
+    "psycopg[binary]>=3.2",
+]
 dev = [
     "pytest>=7.0",
 ]

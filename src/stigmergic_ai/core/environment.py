@@ -24,17 +24,27 @@ substrate -- they never leak into it.
 
 from __future__ import annotations
 
+import abc
+import itertools
 import json
 import logging
 import sqlite3
 import threading
 import time
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 from pydantic import BaseModel, Field, field_validator
 
-__all__ = ["Status", "Entropy", "Pheromone", "PheromoneGround"]
+__all__ = [
+    "Status",
+    "Entropy",
+    "Pheromone",
+    "GroundEvent",
+    "EventSignal",
+    "AbstractGround",
+    "PheromoneGround",
+]
 
 logger = logging.getLogger("stigmergic_ai.environment")
 
@@ -173,7 +183,183 @@ class Pheromone(BaseModel):
         return {"value": value}
 
 
-class PheromoneGround:
+class GroundEvent(BaseModel):
+    """A single observable transition on the ground (for the Swarm Inspector).
+
+    The ground emits one of these after every successful mutation. Because a
+    stigmergic system has no central orchestrator to log a call graph, this
+    event stream *is* the swarm's flight recorder: replay it to reconstruct the
+    full life of any pheromone, or chart the field's entropy over time.
+    """
+
+    seq: int
+    ts: float
+    event_type: str
+    task_id: int
+    status: Status
+    entropy: float
+    owner: str | None = None
+    global_entropy: float = 0.0
+
+
+class EventSignal:
+    """An in-process wake-and-fan-out bus for ground mutations.
+
+    It plays two roles at once:
+
+    * **Wake:** ants can *wait* on it instead of busy-polling -- a consumer
+      sleeps until the ground actually changes (or a timeout elapses), turning
+      the swarm event-driven and killing the CPU cost of tight poll loops.
+    * **Fan-out:** observers (the ``SwarmInspector``) subscribe to receive every
+      :class:`GroundEvent`. Listener exceptions are swallowed, so a buggy
+      observer can never stall or crash the colony.
+
+    The event object is built lazily via a factory, so when nobody is listening
+    the ground pays nothing beyond bumping a counter and notifying waiters.
+    """
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._token = 0
+        self._listeners: list[Callable[[GroundEvent], None]] = []
+
+    def subscribe(self, listener: Callable[[GroundEvent], None]) -> Callable[[], None]:
+        """Register ``listener``; returns a zero-arg unsubscribe handle."""
+        with self._cond:
+            self._listeners.append(listener)
+        return lambda: self.unsubscribe(listener)
+
+    def unsubscribe(self, listener: Callable[[GroundEvent], None]) -> None:
+        """Remove a previously-subscribed listener (idempotent)."""
+        with self._cond:
+            try:
+                self._listeners.remove(listener)
+            except ValueError:
+                pass
+
+    @property
+    def listening(self) -> bool:
+        """``True`` while at least one observer is subscribed."""
+        return bool(self._listeners)
+
+    def signal(self, event_factory: Callable[[], GroundEvent] | None = None) -> None:
+        """Wake all waiters and, if anyone is listening, fan out an event.
+
+        ``event_factory`` is invoked only when there is at least one subscriber,
+        so the (potentially non-trivial) event construction is skipped entirely
+        on the hot path of an unobserved swarm.
+        """
+        with self._cond:
+            self._token += 1
+            self._cond.notify_all()
+            listeners = list(self._listeners)
+        if event_factory is None or not listeners:
+            return
+        event = event_factory()
+        for listener in listeners:
+            try:
+                listener(event)
+            except Exception:  # noqa: BLE001 -- an observer must never break the swarm
+                logger.exception("Ground event listener failed; ignored.")
+
+    def wait(self, timeout: float, stop_event: threading.Event | None = None) -> bool:
+        """Block up to ``timeout`` seconds for the next signal.
+
+        Returns ``True`` if the ground changed, ``False`` on timeout. If
+        ``stop_event`` is already set, returns immediately so a stopping ant
+        never sleeps.
+        """
+        with self._cond:
+            if stop_event is not None and stop_event.is_set():
+                return False
+            start = self._token
+            self._cond.wait(timeout)
+            return self._token != start
+
+
+class AbstractGround(abc.ABC):
+    """The pluggable contract every Pheromone Ground backend must satisfy.
+
+    A *ground* is the shared semantic field the swarm coordinates through. The
+    reference backend is SQLite (:class:`PheromoneGround`); production backends
+    (Postgres with ``LISTEN/NOTIFY``, Redis, DynamoDB) implement this same small
+    surface so the agents -- which only ever touch these ten methods -- stay
+    completely storage-agnostic. Swap the substrate, keep the swarm.
+
+    Every concrete ground owns an :class:`EventSignal` (``self.events``) and is
+    expected to ``signal`` it after each successful mutation. That single
+    convention is what lets both event-driven ants and the Swarm Inspector work
+    uniformly across every backend.
+    """
+
+    events: EventSignal
+
+    @abc.abstractmethod
+    def inject_chaos(self, raw_data: str, *, entropy: float = Entropy.CHAOS,
+                     status: Status | str = Status.RAW,
+                     metadata: dict[str, Any] | None = None) -> int:
+        """Deposit a new pheromone, raising the field's entropy. Returns its id."""
+
+    @abc.abstractmethod
+    def sense(self, *, min_entropy: float = Entropy.MIN,
+              status: Status | str | None = None, limit: int = 10) -> list[Pheromone]:
+        """Read the most urgent matching pheromones without mutating anything."""
+
+    @abc.abstractmethod
+    def claim(self, owner: str, *, min_entropy: float = Entropy.MIN,
+              status: Status | str | None = None,
+              new_status: Status | str = Status.CLAIMED) -> Pheromone | None:
+        """Atomically grab the single most urgent matching pheromone, or None."""
+
+    @abc.abstractmethod
+    def update_state(self, task_id: int, *, entropy: float | None = None,
+                     status: Status | str | None = None, raw_data: str | None = None,
+                     latent_blob: bytes | None = None, owner: str | None = None,
+                     clear_owner: bool = False,
+                     metadata: dict[str, Any] | None = None) -> bool:
+        """Mutate a pheromone (lower entropy / lay a fresh trail). Returns success."""
+
+    @abc.abstractmethod
+    def get(self, task_id: int) -> Pheromone | None:
+        """Fetch a single pheromone by id, or None."""
+
+    @abc.abstractmethod
+    def global_entropy(self) -> float:
+        """Total residual entropy across all non-terminal pheromones."""
+
+    @abc.abstractmethod
+    def stats(self) -> dict[str, int]:
+        """Census of pheromones grouped by status."""
+
+    @abc.abstractmethod
+    def count(self, status: Status | str | None = None) -> int:
+        """Count pheromones, optionally filtered to a single status."""
+
+    @abc.abstractmethod
+    def reset(self) -> None:
+        """Wipe every pheromone from the ground."""
+
+    @abc.abstractmethod
+    def close(self) -> None:
+        """Release the backend's resources (idempotent)."""
+
+    def wait_for_change(self, timeout: float, stop_event: threading.Event | None = None) -> bool:
+        """Block until the ground changes or ``timeout`` elapses (event-driven).
+
+        Backends with a native push channel (Postgres ``LISTEN/NOTIFY``) override
+        this; the default rides on the in-process :class:`EventSignal`, which is
+        already enough to make a single-process swarm fully event-driven.
+        """
+        return self.events.wait(timeout, stop_event)
+
+    def __enter__(self) -> "AbstractGround":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.close()
+
+
+class PheromoneGround(AbstractGround):
     """A thread-safe SQLite substrate the swarm reads from and writes to.
 
     A single connection is shared across every ant thread (guarded by a
@@ -225,6 +411,8 @@ class PheromoneGround:
                 concurrent access.
         """
         self.db_path = db_path
+        self.events = EventSignal()
+        self._seq = itertools.count(1)
         self._lock = threading.RLock()
         # check_same_thread=False: the connection is created here but used by
         # background ant threads. We serialize every access through _lock, so
@@ -302,6 +490,7 @@ class PheromoneGround:
                 (raw_data, None, entropy, status.value, None, now, now, payload),
             )
             task_id = int(cur.lastrowid)
+        self._emit("INJECT", task_id)
         logger.debug(
             "Chaos injected: id=%s entropy=%.3f status=%s", task_id, entropy, status.value
         )
@@ -416,6 +605,7 @@ class PheromoneGround:
 
         claimed = self.get(int(row["id"]))
         if claimed is not None:
+            self._emit("CLAIM", claimed.id)
             logger.debug("Claimed id=%s by owner=%s -> %s", claimed.id, owner, new_status.value)
         return claimed
 
@@ -493,6 +683,7 @@ class PheromoneGround:
         if not changed:
             logger.warning("update_state() found no pheromone with id=%s", task_id)
         else:
+            self._emit("MUTATE", int(task_id))
             logger.debug("Mutated id=%s (%s)", task_id, ", ".join(assignments[:-1]) or "touch")
         return changed
 
@@ -579,6 +770,29 @@ class PheromoneGround:
     def _ensure_open(self) -> None:
         if self._closed:
             raise RuntimeError("PheromoneGround is closed.")
+
+    def _emit(self, event_type: str, task_id: int) -> None:
+        """Wake any event-driven waiters and (if observed) fan out an event."""
+        self.events.signal(lambda: self._build_event(event_type, task_id))
+
+    def _build_event(self, event_type: str, task_id: int) -> GroundEvent:
+        """Snapshot the post-mutation state of ``task_id`` into a GroundEvent.
+
+        Built lazily (only when an observer is attached), so the extra reads
+        here never burden an unobserved swarm.
+        """
+        snapshot = self.get(task_id)
+        if snapshot is None:
+            return GroundEvent(
+                seq=next(self._seq), ts=time.time(), event_type=event_type,
+                task_id=task_id, status=Status.RESOLVED, entropy=0.0,
+                owner=None, global_entropy=self.global_entropy(),
+            )
+        return GroundEvent(
+            seq=next(self._seq), ts=time.time(), event_type=event_type,
+            task_id=snapshot.id, status=snapshot.status, entropy=snapshot.entropy,
+            owner=snapshot.owner, global_entropy=self.global_entropy(),
+        )
 
     @staticmethod
     def _row_to_pheromone(row: sqlite3.Row) -> Pheromone:

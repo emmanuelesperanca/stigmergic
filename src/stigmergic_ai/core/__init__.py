@@ -9,11 +9,26 @@ for tensor injection) are *not* re-exported here; import them explicitly when yo
 opt into the heavier horizons.
 """
 
+from stigmergic_ai.core.backends import create_ground
 from stigmergic_ai.core.environment import (
+    AbstractGround,
     Entropy,
+    EventSignal,
+    GroundEvent,
     Pheromone,
     PheromoneGround,
     Status,
 )
+from stigmergic_ai.core.observability import SwarmInspector
 
-__all__ = ["PheromoneGround", "Pheromone", "Status", "Entropy"]
+__all__ = [
+    "AbstractGround",
+    "PheromoneGround",
+    "Pheromone",
+    "Status",
+    "Entropy",
+    "GroundEvent",
+    "EventSignal",
+    "create_ground",
+    "SwarmInspector",
+]

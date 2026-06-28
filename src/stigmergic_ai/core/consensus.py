@@ -37,6 +37,7 @@ from __future__ import annotations
 import logging
 import re
 import threading
+from collections.abc import Sequence
 from typing import Any, Callable, Protocol, runtime_checkable
 
 from pydantic import BaseModel
@@ -55,6 +56,8 @@ __all__ = [
     "NLIJudge",
     "TransformersNLIJudge",
     "MockNLIJudge",
+    "RuleBasedJudge",
+    "LLMJudge",
     "SemanticRaft",
 ]
 
@@ -107,6 +110,7 @@ class Vote(BaseModel):
     label: str
     score: float
     approve: bool
+    judge: str | None = None
 
 
 class ConsensusVerdict(BaseModel):
@@ -138,6 +142,7 @@ class ConsensusVerdict(BaseModel):
             "votes": [
                 {
                     "node": v.node_id,
+                    "judge": v.judge,
                     "label": v.label,
                     "score": round(v.score, 4),
                     "approve": v.approve,
@@ -296,6 +301,80 @@ class MockNLIJudge:
         return NEUTRAL, 0.55
 
 
+class RuleBasedJudge(MockNLIJudge):
+    """A transparent, model-free juror: deterministic rules + lexical overlap.
+
+    A real quorum should not be three clones of one model -- correlated jurors
+    fail together. This judge is a genuinely *different kind* of voter: it never
+    calls a network or a tensor, just red-flag substrings and token overlap, so
+    it catches blatant injections and obvious non-sequiturs instantly and for
+    free. Slot it alongside an NLI model and an :class:`LLMJudge` to build a
+    heterogeneous panel whose members fail for uncorrelated reasons.
+    """
+
+    model_name = "rule-based-v1"
+
+
+#: Default instruction handed to an :class:`LLMJudge`'s completion function.
+DEFAULT_LLM_PROMPT = (
+    "You are an independent verifier in a Byzantine quorum. Decide whether the "
+    "HYPOTHESIS logically follows from -- and is a safe, faithful, non-malicious "
+    "response to -- the PREMISE. Answer with exactly one label (ENTAILMENT, "
+    "CONTRADICTION, or NEUTRAL) followed by 'confidence: <0..1>'.\n\n"
+    "PREMISE: {premise}\nHYPOTHESIS: {hypothesis}\n\nVerdict:"
+)
+
+
+def _default_llm_parser(text: str) -> tuple[str, float]:
+    """Extract a canonical label and confidence from free-form LLM output."""
+    up = text.upper()
+    if "ENTAIL" in up:
+        label = ENTAILMENT
+    elif "CONTRA" in up:
+        label = CONTRADICTION
+    else:
+        label = NEUTRAL
+    match = re.search(r"(?:CONFIDENCE|SCORE)\D{0,8}(1(?:\.0+)?|0?\.\d+|[01])", up)
+    if match:
+        score = max(0.0, min(1.0, float(match.group(1))))
+    else:
+        score = 0.9 if label != NEUTRAL else 0.5
+    return label, score
+
+
+class LLMJudge:
+    """A provider-agnostic juror backed by any text-completion callable.
+
+    StigmergicAI deliberately refuses to marry a vendor SDK. You supply a
+    ``complete(prompt) -> str`` function -- wrapping OpenAI, Anthropic, a local
+    ``llama.cpp`` server, anything -- and this judge turns it into a quorum
+    member: it frames the ``(premise, hypothesis)`` pair into a prompt, calls
+    your function, and parses the reply into a canonical ``(label, score)``.
+
+    Because the completion function is injected, the judge is fully testable
+    offline with a trivial fake, and a panel can mix several different providers
+    (real model diversity, not one model in three hats).
+    """
+
+    def __init__(
+        self,
+        complete: Callable[[str], str],
+        *,
+        model_name: str = "llm-judge",
+        parser: Callable[[str], tuple[str, float]] | None = None,
+        prompt_template: str = DEFAULT_LLM_PROMPT,
+    ) -> None:
+        self.complete = complete
+        self.model_name = model_name
+        self.parser = parser or _default_llm_parser
+        self.prompt_template = prompt_template
+
+    def classify(self, premise: str, hypothesis: str) -> tuple[str, float]:
+        prompt = self.prompt_template.format(premise=premise, hypothesis=hypothesis)
+        raw = self.complete(prompt)
+        return self.parser(str(raw))
+
+
 # -- the quorum engine --------------------------------------------------------
 
 
@@ -303,10 +382,16 @@ class SemanticRaft:
     """A Byzantine quorum of NLI jurors gating one proposed mutation.
 
     Args:
-        judge: The :class:`NLIJudge` each node consults. Defaults to a
-            (lazily-loaded) :class:`TransformersNLIJudge` on ``model_name``.
-        model_name: Model used when ``judge`` is not supplied.
-        quorum_size: Number of independent juror nodes to poll.
+        judge: The :class:`NLIJudge` each node consults (homogeneous quorum).
+            Defaults to a (lazily-loaded) :class:`TransformersNLIJudge`.
+        judges: A panel of *heterogeneous* jurors -- e.g. a
+            :class:`RuleBasedJudge`, a :class:`TransformersNLIJudge` and an
+            :class:`LLMJudge`. When given, the quorum size becomes the panel
+            size and node ``i`` is judged by ``judges[i]``, so the voters fail
+            for genuinely uncorrelated reasons. Mutually exclusive with ``judge``.
+        model_name: Model used when neither ``judge`` nor ``judges`` is supplied.
+        quorum_size: Number of independent juror nodes to poll (ignored, and
+            taken from the panel size, when ``judges`` is given).
         approval_threshold: Minimum ``ENTAILMENT`` votes required to pass
             (e.g. ``2`` of ``3`` -- a strict majority).
         perspectives: Hypothesis-framing templates giving each node its own
@@ -321,6 +406,7 @@ class SemanticRaft:
         self,
         judge: NLIJudge | None = None,
         *,
+        judges: Sequence[NLIJudge] | None = None,
         model_name: str = DEFAULT_NLI_MODEL,
         quorum_size: int = 3,
         approval_threshold: int = 2,
@@ -329,14 +415,31 @@ class SemanticRaft:
         proposal_key: str = "proposal",
         premise_key: str = "original",
     ) -> None:
+        if judge is not None and judges is not None:
+            raise ValueError(
+                "Pass either a single 'judge' or a 'judges' panel, not both."
+            )
+        if judges is not None:
+            panel = tuple(judges)
+            if not panel:
+                raise ValueError("A heterogeneous 'judges' panel must be non-empty.")
+            quorum_size = len(panel)
+            self._panel: tuple[NLIJudge, ...] | None = panel
+        else:
+            self._panel = None
         if quorum_size < 1:
             raise ValueError("quorum_size must be at least 1.")
         if not (1 <= approval_threshold <= quorum_size):
             raise ValueError("approval_threshold must lie within [1, quorum_size].")
         if not perspectives:
             raise ValueError("At least one perspective template is required.")
-        self.judge: NLIJudge = judge if judge is not None else TransformersNLIJudge(model_name)
-        self.model_name = getattr(self.judge, "model_name", None)
+        if self._panel is not None:
+            self.judge: NLIJudge = self._panel[0]
+            names = [getattr(j, "model_name", None) or "?" for j in self._panel]
+            self.model_name: str | None = "panel:" + ", ".join(names)
+        else:
+            self.judge = judge if judge is not None else TransformersNLIJudge(model_name)
+            self.model_name = getattr(self.judge, "model_name", None)
         self.quorum_size = quorum_size
         self.approval_threshold = approval_threshold
         self.perspectives = tuple(perspectives)
@@ -401,8 +504,10 @@ class SemanticRaft:
         for node_id in range(self.quorum_size):
             perspective = self.perspectives[node_id % len(self.perspectives)]
             framed = perspective.format(hypothesis=hypothesis, premise=premise)
+            judge_i = self._panel[node_id] if self._panel is not None else self.judge
+            judge_name = getattr(judge_i, "model_name", None)
             try:
-                label, score = self.judge.classify(premise, framed)
+                label, score = judge_i.classify(premise, framed)
                 label = _canonical_label(label)
                 approve = label == ENTAILMENT and score >= self.min_confidence
             except Exception:  # noqa: BLE001
@@ -417,6 +522,7 @@ class SemanticRaft:
                     label=label,
                     score=score,
                     approve=approve,
+                    judge=judge_name,
                 )
             )
 

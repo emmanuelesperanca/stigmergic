@@ -135,6 +135,14 @@ class BaseAnt(abc.ABC):
         for the thread to actually wind down.
         """
         self._stop_event.set()
+        # If the ground exposes an event bus, poke it so any ant blocked in an
+        # event-driven wait wakes immediately rather than after a full timeout.
+        waker = getattr(self.env, "events", None)
+        if waker is not None:
+            try:
+                waker.signal()
+            except Exception:  # noqa: BLE001 -- waking is best-effort
+                pass
         self.log.info("Ant %r signalled to stop.", self.name)
 
     def join(self, timeout: float | None = None) -> None:
@@ -164,8 +172,17 @@ class BaseAnt(abc.ABC):
                 # the database, exactly as the Chaos Monkey test demands.
                 self.log.exception("tick() raised; ant survives and retries.")
             # Interruptible sleep: stop() wakes us immediately.
-            self._stop_event.wait(self.poll_interval)
+            self._wait_next()
         self.log.debug("Heartbeat stopped.")
+
+    def _wait_next(self) -> None:
+        """Sleep until the next heartbeat. Overridable for event-driven waits.
+
+        The base behaviour is a plain timed sleep (a producer secretes on a
+        cadence and has no reason to react to the ground). Consumers override
+        this to block on the ground's event bus instead of busy-polling.
+        """
+        self._stop_event.wait(self.poll_interval)
 
     @abc.abstractmethod
     def tick(self) -> None:
@@ -252,6 +269,21 @@ class ConsumerAnt(BaseAnt):
             mutation.new_entropy,
             mutation.new_status.value if mutation.new_status else None,
         )
+
+    def _wait_next(self) -> None:
+        """Event-driven sleep: wake the instant the ground changes.
+
+        A consumer has nothing to do until *something* mutates the ground, so it
+        blocks on the ground's event bus -- waking immediately when an upstream
+        caste lays a fresh trail -- and falls back to ``poll_interval`` as a
+        safety timeout. On a backend with no event bus it degrades to plain
+        polling, so behaviour is identical, just cheaper.
+        """
+        waiter = getattr(self.env, "wait_for_change", None)
+        if waiter is None:
+            self._stop_event.wait(self.poll_interval)
+            return
+        waiter(self.poll_interval, self._stop_event)
 
     @abc.abstractmethod
     def metabolize(self, task: Pheromone) -> Mutation | None:
