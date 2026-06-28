@@ -229,3 +229,7 @@ __marimo__/
 *.sqlite-wal
 *.sqlite-shm
 swarm.db
+
+# Benchmark LLM response cache: opt-in `--llm` runs memoize each provider reply
+# on disk for reproducibility and cost. It is machine-local, not source.
+benchmarks/**/.cache/

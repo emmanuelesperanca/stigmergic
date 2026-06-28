@@ -248,15 +248,18 @@ StigmergicAI targets a security-sensitive category, so it is designed to be *mea
 
 **Threat model — mapped to the [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/).** The Byzantine quorum directly targets `LLM01: Prompt Injection` and `LLM09: Overreliance` (hallucination): no single model commits state, and every verdict carries a durable, replayable audit record (`ConsensusVerdict`).
 
-**Benchmark methodology.** Rather than publish a home-grown number, conformance is being measured on the public stack the field already trusts:
+**Benchmark methodology.** Two layers: a reproducible **internal harness** that measures the quorum directly, plus the public suites the field already trusts for external validation.
 
 | Dimension | Yardstick | Status |
 | :--- | :--- | :--- |
-| Prompt-injection capture | [AgentDojo](https://github.com/ethz-spylab/agentdojo), [InjecAgent](https://github.com/uiuc-kang-lab/InjecAgent) | 🚧 planned |
+| Prompt-injection capture (internal) | OWASP `LLM01` · [`benchmarks/injection_capture`](benchmarks/injection_capture/RESULTS.md) | ✅ measured (torch-free) |
+| Prompt-injection capture (external) | [AgentDojo](https://github.com/ethz-spylab/agentdojo), [InjecAgent](https://github.com/uiuc-kang-lab/InjecAgent) | 🚧 planned |
 | Answer faithfulness (RAG) | [RAGAS](https://github.com/explodinggradients/ragas) | 🚧 planned |
 | Throughput & self-healing | event-driven vs. polling · Chaos-Monkey drain | ✅ demonstrated in examples |
 
-> Honesty first: the injection and faithfulness benchmarks above are a **published roadmap**, not yet-claimed results. The throughput and self-healing properties are demonstrated by the runnable examples today.
+**Internal result (reproducible, torch-free).** On a curated 71-case corpus, the relational quorum lifts prompt-injection **capture from 61% (a keyword denylist) to 98% — at the *same* false-positive rate** — catching every paraphrased and data-exfiltration attack the denylist waves through. Reproduce it with `python benchmarks/injection_capture/run.py`. Closing the residual false-positive gap on adversarial-benign text (legitimate runbooks that merely *mention* `drop table`) is what the opt-in real NLI/LLM jurors (`--nli` / `--llm`) are for — full breakdown in [`RESULTS.md`](benchmarks/injection_capture/RESULTS.md).
+
+> Honesty first: the committed headline is the **torch-free, fully reproducible** configuration. The external suites (AgentDojo, InjecAgent, RAGAS) and the Guardrails/NeMo baselines are a published roadmap — they plug into the same harness as additional scored `Defense` configs. Throughput and self-healing are demonstrated by the runnable examples today.
 
 ---
 

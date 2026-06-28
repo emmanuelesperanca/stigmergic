@@ -51,6 +51,13 @@ cognition = [
 postgres = [
     "psycopg[binary]>=3.2",
 ]
+# The injection-capture benchmark's opt-in real-LLM juror (providers.py). The
+# core benchmark runs torch-free with no extra installs; this is only needed for
+#   python benchmarks/injection_capture/run.py --llm
+# Install with: pip install -e ".[benchmark]"
+benchmark = [
+    "openai>=1.0",
+]
 dev = [
     "pytest>=7.0",
 ]
