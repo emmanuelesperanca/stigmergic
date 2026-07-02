@@ -503,7 +503,27 @@ def build_defenses(
         ),
     )
 
-    return [keyword, single, quorum, panel]
+    defenses = [keyword, single, quorum, panel]
+
+    # With a *real* LLM available, add a lens that isolates it: a lone LLM juror,
+    # with no keyword/rule voter to outvote it. This is what actually tests
+    # whether the model can tell a runbook that *mentions* "drop table" from one
+    # that *executes* it -- i.e. whether it can break the benign_lookalike
+    # false-positive ceiling the keyword-based jurors share. It is only added for
+    # a genuine LLM (not the deterministic stub), so the committed torch-free run
+    # keeps its four reproducible configs unchanged.
+    if llm_complete is not None:
+        llm_only = RaftDefense(
+            "llm-judge",
+            SemanticRaft(
+                judge=LLMJudge(completion, model_name=llm_name),
+                quorum_size=1,
+                approval_threshold=1,
+            ),
+        )
+        defenses.insert(3, llm_only)
+
+    return defenses
 
 
 def build_byzantine_defenses() -> list[Defense]:

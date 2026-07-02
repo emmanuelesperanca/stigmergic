@@ -70,8 +70,21 @@ class Status(str, Enum):
     """A Solver has proposed a resolution; it awaits the Byzantine quorum.
 
     The proposal is *not* yet committed. A Verifier caste must smell this trail,
-    run the Semantic Raft quorum over the proposed logic, and only then drive the
-    pheromone to :attr:`RESOLVED` (quorum passed) or :attr:`SLASHED` (rejected).
+    run the Semantic Raft quorum over the proposed logic, and then either
+    :attr:`SLASHED` it (quorum rejected) or advance it -- straight to
+    :attr:`RESOLVED`, or to :attr:`PENDING_HUMAN` when a human sign-off gate is
+    configured downstream.
+    """
+
+    PENDING_HUMAN = "PENDING_HUMAN"
+    """A machine-approved proposal parked for a human's final sign-off.
+
+    The automated quorum has already vouched for the proposal (so blatant
+    injections and hallucinations never reach a person), but policy requires an
+    expert to approve or reject before the result is committed and, crucially,
+    before it is allowed to teach any durable store. A human-in-the-loop caste
+    reacts to this trail and drives the pheromone to :attr:`RESOLVED` (approved)
+    or hands it to a correction path (rejected). Non-terminal.
     """
 
     LATENT_READY = "LATENT_READY"

@@ -427,7 +427,30 @@ def _comparison_findings(index: dict[tuple[str, str], dict]) -> list[str]:
             f"headline."
         )
 
-    # 2) A real NLI model over-blocks on its own; the panel tames it.
+    # 2) A lone real LLM juror is the only lens that clears the keyword ceiling.
+    llm_cap = pct("torch-free + real-LLM", "llm-judge", "capture_rate")
+    llm_fpr = pct("torch-free + real-LLM", "llm-judge", "false_positive_rate")
+    llm_acc = pct("torch-free + real-LLM", "llm-judge", "accuracy")
+    llm_panel_fpr = pct(
+        "torch-free + real-LLM", "heterogeneous-panel", "false_positive_rate"
+    )
+    llm_panel_acc = pct("torch-free + real-LLM", "heterogeneous-panel", "accuracy")
+    if llm_cap and llm_fpr and llm_acc and llm_panel_fpr and llm_panel_acc:
+        out.append(
+            f"- **A lone LLM juror is the only lens that cracks the look-alike "
+            f"ceiling (model-dependent evidence).** Judging alone, the LLM reaches "
+            f"**{llm_cap}** capture at a **{llm_fpr}** false-positive rate "
+            f"(accuracy **{llm_acc}**) -- the only config to lower the FPR below "
+            f"the **{llm_panel_fpr}** wall *every* denylist-based juror shares, "
+            f"without sacrificing capture. The gain is real but narrow: it recovers "
+            f"context on the `benign_lookalike` runbooks the keyword basis blocks, "
+            f"yet the heterogeneous panel still sits at **{llm_panel_acc}** accuracy "
+            f"because the two keyword jurors outvote the LLM exactly where the "
+            f"ceiling lives. *A semantic juror only helps if the architecture lets "
+            f"it win.*"
+        )
+
+    # 3) A real NLI model over-blocks on its own; the panel tames it.
     nli_sj_cap = pct("real-NLI", "single-judge", "capture_rate")
     nli_sj_fpr = pct("real-NLI", "single-judge", "false_positive_rate")
     nli_panel_cap = pct("real-NLI", "heterogeneous-panel", "capture_rate")
@@ -443,7 +466,7 @@ def _comparison_findings(index: dict[tuple[str, str], dict]) -> list[str]:
             f"uncorrelated jurors tames a single over-confident model.*"
         )
 
-    # 3) The Byzantine tolerance result.
+    # 4) The Byzantine tolerance result.
     byz_comp = pct("byzantine", "compromised-single", "capture_rate")
     byz_quorum = pct("byzantine", "byzantine-quorum-3", "capture_rate")
     byz_par = pct("byzantine", "paranoid-single", "false_positive_rate")
