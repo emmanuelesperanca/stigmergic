@@ -43,7 +43,7 @@ from stigmergic_ai.core.environment import PheromoneGround, Status  # noqa: E402
 from stigmergic_ai.core.observability import SwarmInspector  # noqa: E402
 
 from ants import (  # noqa: E402
-    HumanReviewAnt,
+    GardenerAnt,
     KnowledgeSolverAnt,
     ReviewingVerifierAnt,
     ScriptedExpertOracle,
@@ -75,9 +75,12 @@ CORRECT_VACATION = (
 
 WAVE_ONE: list[Ticket] = [
     Ticket(
-        label="legit",
+        label="legit (+ PII scrub)",
         short="Sign up for the 401(k) retirement plan",
-        description="How do I enrol in the company 401(k) retirement plan as a new hire?",
+        description=(
+            "How do I enrol in the company 401(k) retirement plan as a new hire? "
+            "My personal email is jane.doe@gmail.com and my SSN is 123-45-6789."
+        ),
         decision=("approve", None),
     ),
     Ticket(
@@ -221,6 +224,9 @@ def print_wave_outcomes(
         )
         if ph is not None:
             print(f"      trail: {causal_trail(inspector, ph.id)}")
+            redacted = (ph.metadata or {}).get("pii_redacted")
+            if redacted:
+                print(f"      pii redacted: {', '.join(redacted)}")
     print()
 
 
@@ -281,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
         GovernanceAnt(ground, "governance", poll_interval=args.poll),
         KnowledgeSolverAnt(ground, kb, "kb-solver", poll_interval=args.poll),
         ReviewingVerifierAnt(ground, "verifier", client=client, poll_interval=args.poll),
-        HumanReviewAnt(ground, kb, oracle, "hr-expert", client=client, poll_interval=args.poll),
+        GardenerAnt(ground, kb, oracle, "hr-gardener", client=client, poll_interval=args.poll),
     ]
     for ant in swarm:
         ant.start()
@@ -354,6 +360,21 @@ def main(argv: list[str] | None = None) -> int:
         "The knowledge base was never poisoned (no injection payload persisted).",
     )
 
+    # PII hygiene: the Governance ant scrubbed personal data out of the raw
+    # ticket before it could reach the proposal, the trail, or the soil.
+    pii_number = wave1[0][2]
+    pii_ph = pheromones_by_number(ground).get(pii_number)
+    pii_meta = (pii_ph.metadata or {}) if pii_ph is not None else {}
+    pii_redacted = pii_meta.get("pii_redacted") or []
+    pii_leaked = (
+        "jane.doe@gmail.com" in repr(pii_meta) or "123-45-6789" in repr(pii_meta)
+    )
+    ok_pii = prove(
+        bool(pii_redacted) and not pii_leaked,
+        f"PII in ticket {pii_number} was redacted "
+        f"({', '.join(pii_redacted) or 'none'}) before reaching the soil.",
+    )
+
     # Learning: the base grew, and a follow-up now retrieves a resolved-ticket.
     ok_grew = prove(
         kb_after_wave1 > seed_count,
@@ -387,7 +408,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(RULE)
     all_ok = all(
-        [ok_inj, ok_clean, ok_grew, ok_learned, ok_deleted, ok_corrected]
+        [ok_inj, ok_clean, ok_pii, ok_grew, ok_learned, ok_deleted, ok_corrected]
     )
     print(f"  RESULT: {'ALL PROOFS PASSED' if all_ok else 'SOME PROOFS FAILED'}")
     print(RULE)

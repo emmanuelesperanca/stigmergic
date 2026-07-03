@@ -18,7 +18,7 @@ they coordinate only through the pheromone trails on the shared ground:
         |                                        the incident is Canceled)
         |
         +--[quorum passes]--> PENDING_HUMAN
-                |  HumanReviewAnt        (an expert signs off)
+                |  GardenerAnt           (tends the soil on the expert's word)
                 |
                 +--[approved]--> RESOLVED   (LEARNING: the approved answer is
                 |                            persisted -- the soil grows)
@@ -30,7 +30,7 @@ they coordinate only through the pheromone trails on the shared ground:
 The load-bearing idea: a self-improving knowledge base is a prompt-injection
 *amplifier* unless every writeback is gated. Here the ``SemanticRaft`` quorum --
 the very one benchmarked in the injection suite -- slashes a malicious ticket
-*before* :class:`HumanReviewAnt` can ever persist it, so poison never reaches the
+*before* :class:`GardenerAnt` can ever persist it, so poison never reaches the
 ground.
 """
 
@@ -68,7 +68,7 @@ __all__ = [
     "ServiceNowIntakeAnt",
     "KnowledgeSolverAnt",
     "ReviewingVerifierAnt",
-    "HumanReviewAnt",
+    "GardenerAnt",
 ]
 
 
@@ -349,24 +349,25 @@ class ReviewingVerifierAnt(VerifierAnt):
         return mutation
 
 
-class HumanReviewAnt(ConsumerAnt):
-    """The human gate -- and the hands that persist or heal the knowledge soil.
+class GardenerAnt(ConsumerAnt):
+    """Tends the knowledge garden -- plants approved answers, weeds out bad ones.
 
-    Wakes on ``PENDING_HUMAN`` (proposals the quorum already cleared), consults
-    the injected :data:`ExpertOracle`, and performs the writeback that is the
-    ticket's terminal act (recall that the ground forbids claiming a terminal
-    pheromone, so learning/correction *must* happen here, as the pheromone is
-    driven to ``RESOLVED``):
+    Like a leafcutter tending its fungus garden, this caste cultivates the
+    durable soil: it wakes on ``PENDING_HUMAN`` (proposals the quorum already
+    cleared), consults the injected :data:`ExpertOracle` for the verdict, and
+    performs the writeback that is the ticket's terminal act (the ground forbids
+    claiming a terminal pheromone, so learning/correction *must* happen here, as
+    the pheromone is driven to ``RESOLVED``):
 
     * **Approved** -> :meth:`KnowledgeGround.add` the answer as a
-      ``resolved-ticket`` (the base *learns*), and Resolve the incident.
+      ``resolved-ticket`` (the garden *grows*), and Resolve the incident.
     * **Rejected** -> optionally :meth:`KnowledgeGround.delete` the wrong entry
-      the answer came from, then add the expert's authoritative answer as an
-      ``expert-correction`` (the base *self-heals*), and Resolve the incident with
-      the corrected answer.
+      the answer came from, then plant the expert's authoritative answer as an
+      ``expert-correction`` (the garden *self-heals*), and Resolve the incident
+      with the corrected answer.
 
-    The "human" is the oracle (external judgment); this ant is only the hands that
-    apply that judgment to the soil.
+    The human expert is the oracle (external judgment); this ant is only the
+    gardener's hands that apply that judgment to the soil.
     """
 
     def __init__(

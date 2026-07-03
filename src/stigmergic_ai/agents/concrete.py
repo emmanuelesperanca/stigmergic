@@ -6,20 +6,22 @@ read and write on the shared environment:
 
 * :class:`ForagerAnt` -- a producer that floods the ground with chaotic work,
   mixing legitimate requests with blatant prompt injections.
-* :class:`GovernanceAnt` -- smells high entropy, sanitizes the raw payload, and
-  lays a low-entropy ``HYGIENIZED`` trail.
+* :class:`GovernanceAnt` -- smells high entropy, scrubs PII out of the raw
+  payload, and lays a low-entropy ``HYGIENIZED`` trail.
 * :class:`SolverAnt` -- smells the clean trail, mocks a resolution, and *stages*
   it for review by moving the pheromone to ``PENDING_CONSENSUS``. It never
   finalizes its own work; the Byzantine quorum (a Verifier) does.
 
-The narrative this enables: Governance does cheap, surface-level hygiene, but a
-surviving injection in the payload is only truly caught later by the Verifier's
-semantic quorum -- the real immune system of the swarm.
+The narrative this enables: Governance does cheap, surface-level hygiene (PII
+redaction and tagging), but a surviving injection in the payload is only truly
+caught later by the Verifier's semantic quorum -- the real immune system of the
+swarm.
 """
 
 from __future__ import annotations
 
 import random
+import re
 
 from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation, ProducerAnt
 from stigmergic_ai.core.environment import (
@@ -32,6 +34,8 @@ from stigmergic_ai.core.environment import (
 __all__ = [
     "LEGIT_REQUESTS",
     "INJECTION_ATTACKS",
+    "PII_PATTERNS",
+    "redact_pii",
     "ForagerAnt",
     "GovernanceAnt",
     "SolverAnt",
@@ -99,13 +103,60 @@ class ForagerAnt(ProducerAnt):
         self.log.debug("Foraged %s task #%d: %r", kind, self._counter, raw)
 
 
+# ---------------------------------------------------------------------------
+# PII redaction -- the hygiene layer's scrubber
+# ---------------------------------------------------------------------------
+
+#: Ordered ``(label, pattern, placeholder)`` rules the hygiene layer applies to a
+#: raw payload. Order matters: the most specific digit shapes (SSN, then payment
+#: card) run before the looser phone matcher, so a card is never mistaken for a
+#: phone number.
+PII_PATTERNS: tuple[tuple[str, "re.Pattern[str]", str], ...] = (
+    ("email", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"), "[REDACTED_EMAIL]"),
+    ("ssn", re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[REDACTED_SSN]"),
+    ("credit_card", re.compile(r"\b(?:\d[ -]?){12,15}\d\b"), "[REDACTED_CC]"),
+    (
+        "phone",
+        re.compile(
+            r"(?<!\w)(?:\+?\d{1,3}[ .-]?)?(?:\(\d{3}\)|\d{3})[ .-]?"
+            r"\d{3}[ .-]?\d{4}(?!\w)"
+        ),
+        "[REDACTED_PHONE]",
+    ),
+)
+
+
+def redact_pii(text: str) -> tuple[str, list[str]]:
+    """Strip common PII out of ``text``, returning ``(clean_text, categories)``.
+
+    Applies :data:`PII_PATTERNS` in order, replacing every match with a typed
+    placeholder (so the *shape* of the redaction stays auditable) and reporting
+    which categories were found. Dependency-free and deterministic: a cheap,
+    surface-level scrubber for the hygiene checkpoint, not a substitute for a
+    real DLP pipeline. Emails, US SSNs, payment-card numbers, and phone numbers
+    are covered; free-text names and addresses are deliberately out of scope.
+    """
+    found: list[str] = []
+    clean = text
+    for label, pattern, placeholder in PII_PATTERNS:
+        clean, hits = pattern.subn(placeholder, clean)
+        if hits:
+            found.append(label)
+    return clean, found
+
+
 class GovernanceAnt(ConsumerAnt):
-    """Sanitizes high-entropy raw tasks and lays a clean ``HYGIENIZED`` trail.
+    """Scrubs PII from high-entropy raw tasks and lays a clean ``HYGIENIZED`` trail.
 
     Wakes only on pheromones at or above :attr:`Entropy.HIGH` that are still
-    ``RAW``. It prepends a sanitation tag to the payload, preserves the pristine
-    original request (as the future consensus premise), drops entropy to
-    :attr:`Entropy.LOW`, and stamps :attr:`Status.HYGIENIZED`.
+    ``RAW``. It is the hygiene checkpoint: it redacts PII from the payload (see
+    :func:`redact_pii`), prepends a sanitation tag, and preserves the *redacted*
+    original request as the future consensus premise -- so PII never propagates
+    into the proposal, the trail, or the soil. It then drops entropy to
+    :attr:`Entropy.LOW` and stamps :attr:`Status.HYGIENIZED`. Any PII categories
+    it scrubbed are recorded in ``metadata['pii_redacted']`` for auditing.
+
+    Pass ``redact_pii=False`` to disable scrubbing (tag the payload only).
     """
 
     SANITIZE_TAG = "[SANITIZED]"
@@ -115,6 +166,7 @@ class GovernanceAnt(ConsumerAnt):
         env: PheromoneGround,
         name: str | None = None,
         *,
+        redact_pii: bool = True,
         poll_interval: float = 0.15,
     ) -> None:
         super().__init__(
@@ -124,15 +176,21 @@ class GovernanceAnt(ConsumerAnt):
             target_status=Status.RAW,
             poll_interval=poll_interval,
         )
+        self.redact_pii = redact_pii
 
     def metabolize(self, task: Pheromone) -> Mutation:
         metadata = dict(task.metadata or {})
-        # Keep the untouched original as the premise the Verifier will judge
-        # the eventual proposal against.
-        metadata.setdefault("original", task.raw_data)
+        payload = task.raw_data
+        if self.redact_pii:
+            payload, redacted = redact_pii(payload)
+            if redacted:
+                metadata["pii_redacted"] = redacted
+        # Keep the (redacted) original as the premise the Verifier will judge
+        # the eventual proposal against -- PII never propagates past hygiene.
+        metadata.setdefault("original", payload)
         metadata["hygienized_by"] = self.name
         return Mutation(
-            new_raw_data=f"{self.SANITIZE_TAG} {task.raw_data}",
+            new_raw_data=f"{self.SANITIZE_TAG} {payload}",
             new_entropy=Entropy.LOW,
             new_status=Status.HYGIENIZED,
             metadata=metadata,

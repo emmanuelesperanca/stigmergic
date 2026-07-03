@@ -29,7 +29,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "demos" / "servicenow_hr"))
 
-from stigmergic_ai.agents.concrete import GovernanceAnt  # noqa: E402
+from stigmergic_ai.agents.concrete import GovernanceAnt, redact_pii  # noqa: E402
 from stigmergic_ai.core.consensus import MockNLIJudge  # noqa: E402
 from stigmergic_ai.core.environment import (  # noqa: E402
     Entropy,
@@ -39,7 +39,7 @@ from stigmergic_ai.core.environment import (  # noqa: E402
 )
 
 from ants import (  # noqa: E402
-    HumanReviewAnt,
+    GardenerAnt,
     KnowledgeSolverAnt,
     ReviewingVerifierAnt,
     ScriptedExpertOracle,
@@ -104,7 +104,7 @@ def build_pipeline(ground, kb, client, oracle, *, judge=None):
     verifier = ReviewingVerifierAnt(
         ground, "verifier", client=client, judge=judge or MockNLIJudge()
     )
-    human = HumanReviewAnt(ground, kb, oracle, "human", client=client)
+    human = GardenerAnt(ground, kb, oracle, "gardener", client=client)
     return intake, gov, solver, verifier, human
 
 
@@ -306,6 +306,68 @@ def test_intake_ant_injects_pheromone_and_marks_in_progress() -> None:
         assert client.list_incidents(state=IncidentState.NEW) == []
 
 
+# ---------------------------------------------------------------------------
+# GovernanceAnt PII hygiene
+# ---------------------------------------------------------------------------
+
+
+def test_redact_pii_scrubs_each_category_and_reports_them() -> None:
+    dirty = (
+        "Reach me at jane.doe@corp.com or 555-123-4567; "
+        "SSN 123-45-6789, card 4111 1111 1111 1111."
+    )
+    clean, found = redact_pii(dirty)
+    assert "jane.doe@corp.com" not in clean
+    assert "555-123-4567" not in clean
+    assert "123-45-6789" not in clean
+    assert "4111 1111 1111 1111" not in clean
+    assert set(found) == {"email", "ssn", "credit_card", "phone"}
+
+
+def test_redact_pii_leaves_clean_text_untouched() -> None:
+    text = "How many paid vacation days do full-time employees get?"
+    clean, found = redact_pii(text)
+    assert clean == text
+    assert found == []
+
+
+def test_governance_ant_redacts_pii_and_records_categories() -> None:
+    with PheromoneGround(":memory:") as ground:
+        gov = GovernanceAnt(ground, "gov")
+        task = make_pheromone(
+            status=Status.RAW,
+            entropy=Entropy.CHAOS,
+            raw="Update my contact: email jane.doe@corp.com, phone 555-123-4567.",
+            metadata={"question": "Update my contact", "number": "INC001"},
+        )
+
+        mutation = gov.metabolize(task)
+
+        assert mutation.new_status is Status.HYGIENIZED
+        # PII is scrubbed from both the payload and the premise the jury sees.
+        assert "jane.doe@corp.com" not in mutation.new_raw_data
+        assert "555-123-4567" not in mutation.new_raw_data
+        assert "jane.doe@corp.com" not in mutation.metadata["original"]
+        assert set(mutation.metadata["pii_redacted"]) == {"email", "phone"}
+        # The retrieval question is untouched (PII lives in the body).
+        assert mutation.metadata["question"] == "Update my contact"
+
+
+def test_governance_ant_redaction_can_be_disabled() -> None:
+    with PheromoneGround(":memory:") as ground:
+        gov = GovernanceAnt(ground, "gov", redact_pii=False)
+        task = make_pheromone(
+            status=Status.RAW,
+            entropy=Entropy.CHAOS,
+            raw="email jane.doe@corp.com",
+        )
+
+        mutation = gov.metabolize(task)
+
+        assert "jane.doe@corp.com" in mutation.new_raw_data
+        assert "pii_redacted" not in mutation.metadata
+
+
 def test_solver_ant_retrieves_and_carries_original_into_proposal() -> None:
     with fresh_kb() as kb, PheromoneGround(":memory:") as ground:
         kb.add(
@@ -382,13 +444,13 @@ def test_verifier_slashes_injection_and_cancels_incident() -> None:
         assert client.get(inc.sys_id).state is IncidentState.CANCELED
 
 
-def test_human_review_approve_learns_new_entry_and_resolves() -> None:
+def test_gardener_approve_learns_new_entry_and_resolves() -> None:
     with fresh_kb() as kb, PheromoneGround(":memory:") as ground:
         client = MockServiceNowClient()
         inc = client.create_incident("401k enrollment")
         before = kb.count()
-        human = HumanReviewAnt(
-            ground, kb, approve_all_oracle("qa"), "human", client=client
+        human = GardenerAnt(
+            ground, kb, approve_all_oracle("qa"), "gardener", client=client
         )
         task = make_pheromone(
             status=Status.PENDING_HUMAN,
@@ -409,7 +471,7 @@ def test_human_review_approve_learns_new_entry_and_resolves() -> None:
         assert client.get(inc.sys_id).state is IncidentState.RESOLVED
 
 
-def test_human_review_reject_deletes_wrong_entry_and_heals() -> None:
+def test_gardener_reject_deletes_wrong_entry_and_heals() -> None:
     with fresh_kb() as kb, PheromoneGround(":memory:") as ground:
         client = MockServiceNowClient()
         inc = client.create_incident("vacation days")
@@ -426,7 +488,7 @@ def test_human_review_reject_deletes_wrong_entry_and_heals() -> None:
                 )
             }
         )
-        human = HumanReviewAnt(ground, kb, oracle, "human", client=client)
+        human = GardenerAnt(ground, kb, oracle, "gardener", client=client)
         task = make_pheromone(
             status=Status.PENDING_HUMAN,
             metadata={
@@ -479,6 +541,42 @@ def test_pipeline_learns_an_approved_answer() -> None:
         # The soil grew: the approved resolution was learned.
         assert kb.count() == before + 1
         assert kb.all()[-1].source == KnowledgeSource.RESOLVED_TICKET
+
+
+def test_pipeline_scrubs_pii_before_writeback() -> None:
+    with fresh_kb() as kb, PheromoneGround(":memory:") as ground:
+        client = MockServiceNowClient()
+        kb.add(
+            "How do I enroll in the 401(k) retirement plan?",
+            "Enroll in the 401(k) through the benefits portal during onboarding.",
+        )
+        inc = client.create_incident(
+            "Enroll in the 401(k) retirement plan",
+            description=(
+                "How do I sign up? My email is jane.doe@corp.com "
+                "and my SSN is 123-45-6789."
+            ),
+        )
+        intake, gov, solver, verifier, human = build_pipeline(
+            ground, kb, client, approve_all_oracle("qa")
+        )
+
+        drive(ground, intake, gov, solver, verifier, human)
+
+        ph = _only(ground)
+        assert ph.status is Status.RESOLVED
+        assert client.get(inc.sys_id).state is IncidentState.RESOLVED
+        # PII is scrubbed at the hygiene checkpoint and never propagates into
+        # the pheromone (payload, premise, or proposal)...
+        assert "jane.doe@corp.com" not in ph.raw_data
+        assert "jane.doe@corp.com" not in repr(ph.metadata)
+        assert "123-45-6789" not in repr(ph.metadata)
+        assert set(ph.metadata["pii_redacted"]) == {"email", "ssn"}
+        # ...nor into the durable soil.
+        for entry in kb.all():
+            assert "jane.doe@corp.com" not in entry.question
+            assert "jane.doe@corp.com" not in entry.answer
+            assert "123-45-6789" not in entry.answer
 
 
 def test_pipeline_self_heals_a_wrong_seed() -> None:

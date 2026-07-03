@@ -18,9 +18,12 @@ stops a prompt injection **before it can ever poison the base**.
    searchable "soil". Each entry is a `(question, answer, embedding)` row.
 2. An employee raises an incident in **ServiceNow** (e.g. *"How many paid
    vacation days do I get?"*).
-3. The ant swarm picks it up. The question is embedded and **"falls onto the
-   floor"** next to the nearest stored answer (cosine nearest-neighbour) — the
-   stigmergic idea that a mark left in the environment guides the next agent.
+3. The ant swarm picks it up. A **Governance** ant first scrubs PII (emails,
+   SSNs, payment cards, phone numbers) out of the raw ticket — the hygiene
+   checkpoint — so personal data never reaches the proposal, the trail, or the
+   soil. Then the question is embedded and **"falls onto the floor"** next to
+   the nearest stored answer (cosine nearest-neighbour) — the stigmergic idea
+   that a mark left in the environment guides the next agent.
 4. An ant proposes that answer as the ticket's resolution and sends it for
    **approval**.
 5. **If approved**, the resolution is persisted back into the soil — the base
@@ -53,12 +56,12 @@ pheromone trails (statuses) on the shared ground.
 ```mermaid
 flowchart TD
     NEW([ServiceNow: New incident]) -->|ServiceNowIntakeAnt<br/>secretes RAW, marks In Progress| RAW[RAW]
-    RAW -->|GovernanceAnt<br/>sanitizes| HYG[HYGIENIZED]
+    RAW -->|GovernanceAnt<br/>scrubs PII + sanitizes| HYG[HYGIENIZED]
     HYG -->|KnowledgeSolverAnt<br/>embed → search → propose nearest answer| PC[PENDING_CONSENSUS]
     PC -->|ReviewingVerifierAnt<br/>Byzantine quorum| Q{Quorum}
     Q -->|fails: injection / hallucination| SLASH[SLASHED<br/>· incident Canceled<br/>· nothing written to soil]
     Q -->|passes| PH[PENDING_HUMAN]
-    PH -->|HumanReviewAnt + ExpertOracle| D{Expert}
+    PH -->|GardenerAnt + ExpertOracle| D{Expert}
     D -->|approved| LEARN[RESOLVED<br/>· answer added as resolved-ticket<br/>· soil grows]
     D -->|rejected| HEAL[RESOLVED<br/>· wrong entry deleted<br/>· expert answer added as expert-correction<br/>· soil heals]
 
@@ -72,10 +75,10 @@ flowchart TD
 | Ant | Reads | Writes | Role |
 | --- | --- | --- | --- |
 | `ServiceNowIntakeAnt` | `New` incidents | `RAW` pheromone | Ingests tickets, flips them to `In Progress` (single-intake guard) |
-| `GovernanceAnt` *(reused core caste)* | `RAW` | `HYGIENIZED` | Sanitizes raw input, preserves the original for the jury |
+| `GovernanceAnt` *(reused core caste)* | `RAW` | `HYGIENIZED` | **Scrubs PII** (email / SSN / card / phone) + sanitizes raw input; preserves the redacted original for the jury |
 | `KnowledgeSolverAnt` | `HYGIENIZED` | `PENDING_CONSENSUS` | Embeds the question, searches the soil, proposes the nearest answer |
 | `ReviewingVerifierAnt` | `PENDING_CONSENSUS` | `PENDING_HUMAN` / `SLASHED` | Byzantine quorum — the KB's immune system |
-| `HumanReviewAnt` | `PENDING_HUMAN` | `RESOLVED` | Applies the expert's ruling: **learn** or **heal** the soil |
+| `GardenerAnt` | `PENDING_HUMAN` | `RESOLVED` | Tends the soil on the expert's ruling: **learn** (plant) or **heal** (weed + replant) |
 
 ## Pheromone ↔ ServiceNow state mapping
 
@@ -94,7 +97,7 @@ flowchart TD
 
 | Ticket | Outcome |
 | --- | --- |
-| 401(k) enrollment | Approved → **learned** |
+| 401(k) enrollment *(email + SSN in the body)* | PII **redacted** at hygiene, then approved → **learned** |
 | Home-office chair reimbursement | Approved → **learned** (seeds a follow-up) |
 | Annual vacation days *(seed answer is deliberately wrong: "5 days")* | Rejected → **corrected** to "20 days" (wrong seed deleted) |
 | Emergency-contact update *(injection in the description)* | **Slashed** → incident **Canceled**, nothing written |
@@ -106,9 +109,10 @@ flowchart TD
 | Desk-chair follow-up | Lands on the **learned** resolved-ticket entry from wave 1 |
 | Vacation follow-up | Lands on the **corrected** "20 days" answer, not the deleted "5 days" seed |
 
-The run ends by asserting six proofs (injection canceled, KB never poisoned, the
-soil grew, learning is reused, the wrong seed was deleted, and the correction is
-authoritative) and exits non-zero if any fails.
+The run ends by asserting seven proofs (injection canceled, KB never poisoned,
+PII redacted before writeback, the soil grew, learning is reused, the wrong seed
+was deleted, and the correction is authoritative) and exits non-zero if any
+fails.
 
 ---
 

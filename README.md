@@ -165,7 +165,7 @@ Every caste reacts only to a scent (`Status`) and an entropy threshold. None of 
 | Caste | Role in the colony | Biological analog | Reacts to → leaves |
 | :--- | :--- | :--- | :--- |
 | `ForagerAnt` | Producer: floods the ground with work | Forager bringing food home | — → `RAW` |
-| `GovernanceAnt` | Sanitizes raw payloads | Hygienic worker ant | `RAW` → `HYGIENIZED` |
+| `GovernanceAnt` | Scrubs PII + sanitizes raw payloads | Hygienic worker ant | `RAW` → `HYGIENIZED` |
 | `SolverAnt` | Proposes a resolution for review | Worker executing a task | `HYGIENIZED` → `PENDING_CONSENSUS` |
 | `VerifierAnt` | Runs the Byzantine quorum | White blood cell | `PENDING_CONSENSUS` → `RESOLVED` / `SLASHED` |
 | `HybridSolverAnt` | Cloud text **or** local latent encoding | Sensory neuron | `HYGIENIZED`/`RAW` → `PENDING_CONSENSUS` / `LATENT_READY` |
