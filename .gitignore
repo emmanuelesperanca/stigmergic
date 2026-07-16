@@ -236,3 +236,7 @@ benchmarks/**/.cache/
 
 # Draft of the Medium blog post -- unpublished writing, not shipped with the code.
 medium_post
+
+# Local interactive visualization (didactic swarm animation for demos/videos).
+# Generated from a real SwarmInspector run; not part of the shipped package.
+viz/
