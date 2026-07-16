@@ -1,4 +1,4 @@
-"""StigmergicAI: a zero-dependency, mathematically secure multi-agent framework.
+"""StigmergicAI: a near-zero-dependency, fault-tolerant multi-agent framework.
 
 StigmergicAI models a multi-agent system as a physical ecosystem rather than an
 org chart. Agents ("ants") never call one another; they coordinate solely by

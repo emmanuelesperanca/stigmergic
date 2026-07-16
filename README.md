@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://GitHub.com/Naereen/StrapDown.js/graphs/commit-activity)
 
-> **A zero-dependency, mathematically secure multi-agent framework based on Stigmergy, Latent State Transfer, and Byzantine Fault Tolerance.**
+> **A near-zero-dependency, fault-tolerant multi-agent framework built on Stigmergy, Latent State Transfer, and a Byzantine-inspired consensus quorum.**
 >
 > *The decomposer layer for **operational entropy** — the endless rain of tickets, invoices, and alerts that traditional automation can't keep up with.*
 
@@ -12,7 +12,7 @@ Forget API chaining, central orchestrators, and fragile `Agent-A → Agent-B` st
 
 Nature solved distributed computing 500 million years before we invented the CPU. Ant colonies coordinate thousands of workers with no manager. Your immune system runs a planet-scale security audit with no central firewall. Your neurons exchange thought without ever flattening it into words. **StigmergicAI is a shameless plagiarism of that biology** — three battle-tested survival strategies, ported into a framework for LLM agents.
 
-If LangGraph is a rigid assembly line, StigmergicAI is an ant colony: decentralized, self-healing, and mathematically protected against hallucination.
+If LangGraph is a rigid assembly line, StigmergicAI is an ant colony: decentralized, self-healing, and consensus-guarded against hallucination and prompt injection.
 
 ---
 
@@ -83,9 +83,11 @@ Each horizon is a capability lifted straight from a living system.
 | The pheromone evaporating | An ant setting `Entropy.ZERO` |
 | A colony surviving a dead ant | A killed thread; the task stays durable in the DB |
 
-> **Zero coupling, absolute resilience.** An ant wakes, senses high entropy (unresolved work), acts, lowers the entropy, and sleeps. Kill the process and the work simply waits in the database for the swarm to resume — eventual consistency with no orchestrator. (This is the Chaos Monkey test below.)
+> **Zero coupling, durable resilience.** An ant wakes, senses high entropy (unresolved work), acts, lowers the entropy, and sleeps. Kill the process and the work simply waits in the database for the swarm to resume — eventual consistency with no orchestrator. (This is the Chaos Monkey test below.)
 >
 > The swarm is **event-driven**: ants idle at *zero CPU* and wake the instant the ground changes — no busy-polling — and every mutation is observable through the **`SwarmInspector`**, a flight recorder that replays any pheromone's life and charts field entropy over time.
+>
+> **Production reliability.** The ground is more than a queue. A **work-lease** returns a crashed worker's task to the pool (`reclaim_expired_leases`); **optimistic concurrency** (a `version` compare-and-swap) rejects a stale write from a reclaimed worker; an **idempotency key** stops a re-delivered event creating duplicate work; a **dead-letter** state (`DEAD_LETTER`) parks a poison-pill after a bounded number of retries; and an opt-in **formal state machine** (`enforce_transitions`) rejects any illegal lifecycle hop. Each is a flag on the ground — no ant changes.
 
 ### 🛡️ Horizon 2 — Byzantine Cognitive Consensus · *The Immune System*
 

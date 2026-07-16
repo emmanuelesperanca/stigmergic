@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "stigmergic-ai"
 version = "0.1.0"
-description = "A zero-dependency, mathematically secure multi-agent framework based on Stigmergy, Latent State Transfer, and Byzantine Fault Tolerance."
+description = "A near-zero-dependency, fault-tolerant multi-agent framework built on Stigmergy, Latent State Transfer, and a Byzantine-inspired consensus quorum."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
