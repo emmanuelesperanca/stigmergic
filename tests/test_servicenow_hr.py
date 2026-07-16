@@ -344,6 +344,9 @@ def test_intake_ant_injects_pheromone_and_marks_in_progress() -> None:
         assert raw[0].metadata["number"] == inc.number
         assert raw[0].metadata["question"] == "Reset my password"
         assert raw[0].metadata["sys_id"] == inc.sys_id
+        # The incident's sys_id is the idempotency key, so a re-poll of the same
+        # ticket can never create a duplicate pheromone.
+        assert raw[0].idempotency_key == inc.sys_id
         # The incident is flipped out of NEW so it can never be ingested twice.
         assert client.get(inc.sys_id).state is IncidentState.IN_PROGRESS
         assert client.list_incidents(state=IncidentState.NEW) == []

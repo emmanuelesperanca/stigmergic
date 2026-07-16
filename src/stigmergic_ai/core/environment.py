@@ -44,6 +44,8 @@ __all__ = [
     "EventSignal",
     "AbstractGround",
     "PheromoneGround",
+    "TERMINAL_STATUSES",
+    "STATE_TRANSITIONS",
 ]
 
 logger = logging.getLogger("stigmergic_ai.environment")
@@ -102,9 +104,70 @@ class Status(str, Enum):
     SLASHED = "SLASHED"
     """Terminal failure. Rejected by Byzantine quorum (hallucination/injection)."""
 
+    DEAD_LETTER = "DEAD_LETTER"
+    """Terminal failure. A poison-pill task that exhausted its retry budget.
+
+    Reached when an ant's :meth:`metabolize` keeps raising: after a bounded
+    number of retries the task is parked here (with a ``dlq_reason``) instead of
+    being reclaimed forever, so one bad item can never wedge the swarm.
+    """
+
 
 #: Statuses from which no further work should be picked up.
-TERMINAL_STATUSES: frozenset[Status] = frozenset({Status.RESOLVED, Status.SLASHED})
+TERMINAL_STATUSES: frozenset[Status] = frozenset(
+    {Status.RESOLVED, Status.SLASHED, Status.DEAD_LETTER}
+)
+
+#: The legal state machine: each status maps to the trails it may advance to.
+#: ``CLAIMED`` is the hub every caste passes through, and any non-terminal status
+#: may be dead-lettered. This is enforced only when a ground is created with
+#: ``enforce_transitions=True`` (off by default, so existing swarms are untouched);
+#: when on, :meth:`PheromoneGround.update_state` rejects an illegal hop instead of
+#: silently corrupting the lifecycle. The atomic ``claim``/``reclaim`` primitives
+#: manage the ``CLAIMED`` hop themselves and are not re-validated here.
+STATE_TRANSITIONS: dict[Status, frozenset[Status]] = {
+    Status.RAW: frozenset(
+        {Status.CLAIMED, Status.HYGIENIZED, Status.DEAD_LETTER}
+    ),
+    Status.CLAIMED: frozenset(
+        {
+            Status.RAW,
+            Status.HYGIENIZED,
+            Status.PENDING_CONSENSUS,
+            Status.PENDING_HUMAN,
+            Status.LATENT_READY,
+            Status.RESOLVED,
+            Status.SLASHED,
+            Status.DEAD_LETTER,
+        }
+    ),
+    Status.HYGIENIZED: frozenset(
+        {
+            Status.CLAIMED,
+            Status.PENDING_CONSENSUS,
+            Status.RESOLVED,
+            Status.DEAD_LETTER,
+        }
+    ),
+    Status.PENDING_CONSENSUS: frozenset(
+        {
+            Status.CLAIMED,
+            Status.PENDING_HUMAN,
+            Status.RESOLVED,
+            Status.SLASHED,
+            Status.DEAD_LETTER,
+        }
+    ),
+    Status.PENDING_HUMAN: frozenset(
+        {Status.CLAIMED, Status.RESOLVED, Status.SLASHED, Status.DEAD_LETTER}
+    ),
+    Status.LATENT_READY: frozenset(
+        {Status.CLAIMED, Status.RESOLVED, Status.DEAD_LETTER}
+    ),
+    Status.RESOLVED: frozenset(),
+    Status.SLASHED: frozenset(),
+    Status.DEAD_LETTER: frozenset(),
+}
 
 
 class Entropy:
@@ -177,6 +240,12 @@ class Pheromone(BaseModel):
     created_at: float
     updated_at: float
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # Reliability bookkeeping (optimistic concurrency, work-lease, dead-letter).
+    version: int = 1
+    retry_count: int = 0
+    lease_expires_at: float | None = None
+    idempotency_key: str | None = None
+    dlq_reason: str | None = None
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -391,15 +460,21 @@ class PheromoneGround(AbstractGround):
 
     _SCHEMA = """
     CREATE TABLE IF NOT EXISTS pheromones (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
-        raw_data    TEXT    NOT NULL,
-        latent_blob BLOB,
-        entropy     REAL    NOT NULL,
-        status      TEXT    NOT NULL,
-        owner       TEXT,
-        created_at  REAL    NOT NULL,
-        updated_at  REAL    NOT NULL,
-        metadata    TEXT
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        raw_data         TEXT    NOT NULL,
+        latent_blob      BLOB,
+        entropy          REAL    NOT NULL,
+        status           TEXT    NOT NULL,
+        owner            TEXT,
+        created_at       REAL    NOT NULL,
+        updated_at       REAL    NOT NULL,
+        metadata         TEXT,
+        version          INTEGER NOT NULL DEFAULT 1,
+        retry_count      INTEGER NOT NULL DEFAULT 0,
+        lease_expires_at REAL,
+        idempotency_key  TEXT,
+        dlq_reason       TEXT,
+        claimed_from     TEXT
     );
     """
 
@@ -408,14 +483,19 @@ class PheromoneGround(AbstractGround):
         "ON pheromones (status);",
         "CREATE INDEX IF NOT EXISTS idx_pheromones_sense "
         "ON pheromones (status, entropy DESC, id ASC);",
+        "CREATE INDEX IF NOT EXISTS idx_pheromones_idempotency "
+        "ON pheromones (idempotency_key);",
     )
 
     _COLUMNS = (
         "id, raw_data, latent_blob, entropy, status, "
-        "owner, created_at, updated_at, metadata"
+        "owner, created_at, updated_at, metadata, "
+        "version, retry_count, lease_expires_at, idempotency_key, dlq_reason"
     )
 
-    def __init__(self, db_path: str = ":memory:", *, busy_timeout_ms: int = 5000) -> None:
+    def __init__(self, db_path: str = ":memory:", *, busy_timeout_ms: int = 5000,
+                 default_lease_seconds: float = 30.0,
+                 enforce_transitions: bool = False) -> None:
         """Open (and initialize) the Pheromone Ground.
 
         Args:
@@ -424,10 +504,18 @@ class PheromoneGround(AbstractGround):
             busy_timeout_ms: How long a writer waits on a locked database before
                 raising, in milliseconds. Relevant for file-backed grounds under
                 concurrent access.
+            default_lease_seconds: How long a :meth:`claim` holds a work-lease
+                before :meth:`reclaim_expired_leases` may hand the task to a
+                healthy peer (guards against a crashed ant wedging a task).
+            enforce_transitions: When ``True``, :meth:`update_state` rejects any
+                status change not permitted by :data:`STATE_TRANSITIONS` (a formal
+                lifecycle guard). Off by default so existing swarms are untouched.
         """
         self.db_path = db_path
         self.events = EventSignal()
         self._seq = itertools.count(1)
+        self._default_lease_seconds = float(default_lease_seconds)
+        self._enforce_transitions = enforce_transitions
         self._lock = threading.RLock()
         # check_same_thread=False: the connection is created here but used by
         # background ant threads. We serialize every access through _lock, so
@@ -462,9 +550,28 @@ class PheromoneGround(AbstractGround):
         with self._lock:
             cur = self._conn.cursor()
             cur.execute(self._SCHEMA)
+            self._migrate_reliability_columns(cur)
             for statement in self._INDEXES:
                 cur.execute(statement)
             cur.close()
+
+    def _migrate_reliability_columns(self, cur: sqlite3.Cursor) -> None:
+        """Add reliability columns to a table created by an older version."""
+        existing = {
+            row["name"]
+            for row in cur.execute("PRAGMA table_info(pheromones)").fetchall()
+        }
+        additions = {
+            "version": "INTEGER NOT NULL DEFAULT 1",
+            "retry_count": "INTEGER NOT NULL DEFAULT 0",
+            "lease_expires_at": "REAL",
+            "idempotency_key": "TEXT",
+            "dlq_reason": "TEXT",
+            "claimed_from": "TEXT",
+        }
+        for col, ddl in additions.items():
+            if col not in existing:
+                cur.execute(f"ALTER TABLE pheromones ADD COLUMN {col} {ddl}")
 
     # -- deposit (raise entropy) ---------------------------------------------
 
@@ -476,6 +583,7 @@ class PheromoneGround(AbstractGround):
         status: Status | str = Status.RAW,
         metadata: dict[str, Any] | None = None,
         redactor: "Callable[[str], tuple[str, list[str]]] | None" = None,
+        idempotency_key: str | None = None,
     ) -> int:
         """Deposit a new pheromone, *raising* the field's entropy.
 
@@ -492,6 +600,10 @@ class PheromoneGround(AbstractGround):
                 to ``raw_data`` **before** it is persisted, so sensitive data (e.g.
                 PII) never reaches the durable store, logs or the event trail. Any
                 reported categories are recorded under ``pii_redacted_at_intake``.
+            idempotency_key: Optional dedup key. If a non-terminal pheromone with
+                this key already exists, its id is returned and nothing new is
+                injected -- so re-delivering the same source event (e.g. a polled
+                ticket) can never create duplicate work.
 
         Returns:
             The autoincrement id of the freshly deposited pheromone.
@@ -507,12 +619,37 @@ class PheromoneGround(AbstractGround):
         payload = json.dumps(meta)
         with self._lock:
             self._ensure_open()
+            if idempotency_key is not None:
+                terminal = tuple(s.value for s in TERMINAL_STATUSES)
+                existing = self._conn.execute(
+                    "SELECT id FROM pheromones WHERE idempotency_key = ? "
+                    f"AND status NOT IN ({','.join('?' * len(terminal))}) "
+                    "ORDER BY id DESC LIMIT 1;",
+                    (idempotency_key, *terminal),
+                ).fetchone()
+                if existing is not None:
+                    logger.debug(
+                        "inject_chaos deduplicated on idempotency_key=%r -> id=%s",
+                        idempotency_key,
+                        existing["id"],
+                    )
+                    return int(existing["id"])
             cur = self._conn.execute(
                 "INSERT INTO pheromones "
                 "(raw_data, latent_blob, entropy, status, owner, "
-                "created_at, updated_at, metadata) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?);",
-                (raw_data, None, entropy, status.value, None, now, now, payload),
+                "created_at, updated_at, metadata, idempotency_key) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);",
+                (
+                    raw_data,
+                    None,
+                    entropy,
+                    status.value,
+                    None,
+                    now,
+                    now,
+                    payload,
+                    idempotency_key,
+                ),
             )
             task_id = int(cur.lastrowid)
         self._emit("INJECT", task_id)
@@ -570,6 +707,7 @@ class PheromoneGround(AbstractGround):
         min_entropy: float = Entropy.MIN,
         status: Status | str | None = None,
         new_status: Status | str = Status.CLAIMED,
+        lease_seconds: float | None = None,
     ) -> Pheromone | None:
         """Atomically grab the single most urgent matching pheromone.
 
@@ -615,10 +753,23 @@ class PheromoneGround(AbstractGround):
                     cur.execute("COMMIT;")
                     return None
                 now = time.time()
+                lease = (
+                    self._default_lease_seconds
+                    if lease_seconds is None
+                    else lease_seconds
+                )
                 cur.execute(
-                    "UPDATE pheromones SET status = ?, owner = ?, updated_at = ? "
-                    "WHERE id = ?;",
-                    (new_status.value, owner, now, row["id"]),
+                    "UPDATE pheromones SET status = ?, owner = ?, updated_at = ?, "
+                    "lease_expires_at = ?, retry_count = retry_count + 1, "
+                    "claimed_from = ? WHERE id = ?;",
+                    (
+                        new_status.value,
+                        owner,
+                        now,
+                        now + lease,
+                        row["status"],
+                        row["id"],
+                    ),
                 )
                 cur.execute("COMMIT;")
             except sqlite3.Error:
@@ -634,6 +785,56 @@ class PheromoneGround(AbstractGround):
             logger.debug("Claimed id=%s by owner=%s -> %s", claimed.id, owner, new_status.value)
         return claimed
 
+    def reclaim_expired_leases(
+        self, *, reclaim_status: Status | str = Status.RAW
+    ) -> list[int]:
+        """Return expired-lease work to the pool so a healthy ant can retry it.
+
+        A worker that crashed (or stalled) while holding a claimed pheromone
+        leaves its lease behind. Once the lease elapses, this sweep clears the
+        owner, reverts the trail to whatever the task was claimed *from* (so the
+        right caste picks it up again), bumps the ``version`` -- which invalidates
+        any in-flight optimistic write from the dead worker -- and returns the
+        reclaimed ids. Terminal pheromones are never touched.
+        """
+        fallback = _coerce_status(reclaim_status).value
+        now = time.time()
+        terminal = tuple(s.value for s in TERMINAL_STATUSES)
+        reclaimed: list[int] = []
+        with self._lock:
+            self._ensure_open()
+            cur = self._conn.cursor()
+            try:
+                cur.execute("BEGIN IMMEDIATE;")
+                rows = cur.execute(
+                    "SELECT id, claimed_from FROM pheromones "
+                    "WHERE owner IS NOT NULL AND lease_expires_at IS NOT NULL "
+                    "AND lease_expires_at < ? "
+                    f"AND status NOT IN ({','.join('?' * len(terminal))});",
+                    (now, *terminal),
+                ).fetchall()
+                for r in rows:
+                    revert = r["claimed_from"] or fallback
+                    cur.execute(
+                        "UPDATE pheromones SET owner = NULL, status = ?, "
+                        "lease_expires_at = NULL, version = version + 1, "
+                        "updated_at = ? WHERE id = ?;",
+                        (revert, now, r["id"]),
+                    )
+                    reclaimed.append(int(r["id"]))
+                cur.execute("COMMIT;")
+            except sqlite3.Error:
+                cur.execute("ROLLBACK;")
+                logger.exception("reclaim_expired_leases() failed; rolled back.")
+                raise
+            finally:
+                cur.close()
+        for task_id in reclaimed:
+            self._emit("MUTATE", task_id)
+        if reclaimed:
+            logger.info("Reclaimed %d expired-lease pheromone(s): %s", len(reclaimed), reclaimed)
+        return reclaimed
+
     # -- mutate (lower entropy / lay trail) -----------------------------------
 
     def update_state(
@@ -647,13 +848,17 @@ class PheromoneGround(AbstractGround):
         owner: str | None = None,
         clear_owner: bool = False,
         metadata: dict[str, Any] | None = None,
+        expected_version: int | None = None,
+        dlq_reason: str | None = None,
+        reset_retries: bool = False,
     ) -> bool:
         """Mutate an existing pheromone -- the universal "act" primitive.
 
         Lowering ``entropy`` and stamping a new ``status`` is how an ant lays a
         fresh chemical trail for the next caste (or evaporates the pheromone
         entirely by driving entropy to zero). Only the fields you pass are
-        touched; ``updated_at`` is always refreshed.
+        touched; ``updated_at`` and the optimistic-concurrency ``version`` are
+        always refreshed, and releasing the owner also releases its work-lease.
 
         Args:
             task_id: The pheromone to mutate.
@@ -665,12 +870,29 @@ class PheromoneGround(AbstractGround):
             clear_owner: If ``True``, reset ``owner`` to ``NULL`` (mutually
                 exclusive with ``owner``).
             metadata: Replacement metadata mapping, if changing.
+            expected_version: If given, the update only applies when the row is
+                still at this ``version`` (optimistic compare-and-swap). A stale
+                write -- e.g. from a worker whose lease was reclaimed -- finds no
+                matching row and returns ``False`` instead of clobbering newer state.
+            dlq_reason: Reason string to record when parking a poison-pill task.
 
         Returns:
-            ``True`` if a row was updated, ``False`` if ``task_id`` did not exist.
+            ``True`` if a row was updated, ``False`` if ``task_id`` did not exist
+            or the ``expected_version`` no longer matched.
         """
         if owner is not None and clear_owner:
             raise ValueError("Pass either owner or clear_owner, not both.")
+
+        if self._enforce_transitions and status is not None:
+            current = self.get(int(task_id))
+            if current is not None:
+                target = _coerce_status(status)
+                allowed = STATE_TRANSITIONS.get(current.status, frozenset())
+                if target != current.status and target not in allowed:
+                    raise ValueError(
+                        f"Illegal transition {current.status.value} -> "
+                        f"{target.value} for pheromone id={task_id}."
+                    )
 
         assignments: list[str] = []
         params: list[Any] = []
@@ -686,27 +908,51 @@ class PheromoneGround(AbstractGround):
         if latent_blob is not None:
             assignments.append("latent_blob = ?")
             params.append(latent_blob)
+        if dlq_reason is not None:
+            assignments.append("dlq_reason = ?")
+            params.append(dlq_reason)
         if clear_owner:
             assignments.append("owner = NULL")
+            # Releasing ownership also releases any held work-lease.
+            assignments.append("lease_expires_at = NULL")
         elif owner is not None:
             assignments.append("owner = ?")
             params.append(owner)
         if metadata is not None:
             assignments.append("metadata = ?")
             params.append(json.dumps(metadata))
+        if reset_retries:
+            # A successful hand-off is progress, not a retry: clear the counter
+            # so only genuine re-claims after a failure trend toward the DLQ.
+            assignments.append("retry_count = 0")
 
-        # Always refresh the heartbeat, even for an otherwise empty mutation.
+        # Every mutation bumps the optimistic-concurrency version...
+        assignments.append("version = version + 1")
+        # ...and refreshes the heartbeat, even for an otherwise empty mutation.
         assignments.append("updated_at = ?")
         params.append(time.time())
-        params.append(int(task_id))
 
-        sql = f"UPDATE pheromones SET {', '.join(assignments)} WHERE id = ?;"
+        where = "id = ?"
+        params.append(int(task_id))
+        if expected_version is not None:
+            where += " AND version = ?"
+            params.append(int(expected_version))
+
+        sql = f"UPDATE pheromones SET {', '.join(assignments)} WHERE {where};"
         with self._lock:
             self._ensure_open()
             cur = self._conn.execute(sql, params)
             changed = cur.rowcount > 0
         if not changed:
-            logger.warning("update_state() found no pheromone with id=%s", task_id)
+            if expected_version is not None:
+                logger.debug(
+                    "update_state() version conflict or missing id=%s "
+                    "(expected version=%s)",
+                    task_id,
+                    expected_version,
+                )
+            else:
+                logger.warning("update_state() found no pheromone with id=%s", task_id)
         else:
             self._emit("MUTATE", int(task_id))
             logger.debug("Mutated id=%s (%s)", task_id, ", ".join(assignments[:-1]) or "touch")
@@ -832,4 +1078,9 @@ class PheromoneGround(AbstractGround):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             metadata=row["metadata"],
+            version=row["version"],
+            retry_count=row["retry_count"],
+            lease_expires_at=row["lease_expires_at"],
+            idempotency_key=row["idempotency_key"],
+            dlq_reason=row["dlq_reason"],
         )

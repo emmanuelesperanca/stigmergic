@@ -44,6 +44,7 @@ from stigmergic_ai.core.observability import SwarmInspector  # noqa: E402
 
 from ants import (  # noqa: E402
     GardenerAnt,
+    JanitorAnt,
     KnowledgeSolverAnt,
     ReviewingVerifierAnt,
     ScriptedExpertOracle,
@@ -281,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
     oracle = ScriptedExpertOracle(script, reviewer="hr-specialist")
 
     # 3. The swarm (no ant ever calls another) --------------------------------
-    ground = PheromoneGround(":memory:")
+    ground = PheromoneGround(":memory:", enforce_transitions=True)
     inspector = SwarmInspector().attach(ground)
     swarm = [
         ServiceNowIntakeAnt(ground, client, "sn-intake", poll_interval=args.poll),
@@ -289,6 +290,7 @@ def main(argv: list[str] | None = None) -> int:
         KnowledgeSolverAnt(ground, kb, "kb-solver", poll_interval=args.poll),
         ReviewingVerifierAnt(ground, "verifier", client=client, poll_interval=args.poll),
         GardenerAnt(ground, kb, oracle, "hr-gardener", client=client, poll_interval=args.poll),
+        JanitorAnt(ground, "janitor", poll_interval=args.poll),
     ]
     for ant in swarm:
         ant.start()

@@ -89,6 +89,7 @@ class PostgresGround(AbstractGround):
         *,
         table: str = "pheromones",
         channel: str = "pheromone_events",
+        default_lease_seconds: float = 30.0,
     ) -> None:
         """Connect, ensure the schema, and start listening for notifications.
 
@@ -96,6 +97,7 @@ class PostgresGround(AbstractGround):
             dsn: A libpq/psycopg connection string (``postgresql://user:pw@host/db``).
             table: Table name for the pheromone field (validated as a safe ident).
             channel: ``LISTEN/NOTIFY`` channel name (validated as a safe ident).
+            default_lease_seconds: Default work-lease duration set on :meth:`claim`.
         """
         psycopg = _require_psycopg()
 
@@ -107,6 +109,7 @@ class PostgresGround(AbstractGround):
         self._seq = 0
         self._seq_lock = threading.Lock()
         self._closed = False
+        self._default_lease_seconds = float(default_lease_seconds)
 
         from psycopg.rows import dict_row
 
@@ -142,14 +145,36 @@ class PostgresGround(AbstractGround):
                 owner       TEXT,
                 created_at  DOUBLE PRECISION NOT NULL,
                 updated_at  DOUBLE PRECISION NOT NULL,
-                metadata    JSONB NOT NULL DEFAULT '{{}}'::jsonb
+                metadata    JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                version          INTEGER NOT NULL DEFAULT 1,
+                retry_count      INTEGER NOT NULL DEFAULT 0,
+                lease_expires_at DOUBLE PRECISION,
+                idempotency_key  TEXT,
+                dlq_reason       TEXT,
+                claimed_from     TEXT
             )
             """
         )
+        # Idempotent migrations for a table created by an older version.
+        for col, ddl in (
+            ("version", "INTEGER NOT NULL DEFAULT 1"),
+            ("retry_count", "INTEGER NOT NULL DEFAULT 0"),
+            ("lease_expires_at", "DOUBLE PRECISION"),
+            ("idempotency_key", "TEXT"),
+            ("dlq_reason", "TEXT"),
+            ("claimed_from", "TEXT"),
+        ):
+            self._conn.execute(
+                f"ALTER TABLE {self.table} ADD COLUMN IF NOT EXISTS {col} {ddl}"
+            )
         # Index the claim's sort/filter so SKIP LOCKED scans stay cheap at scale.
         self._conn.execute(
             f"CREATE INDEX IF NOT EXISTS {self.table}_claim_idx "
             f"ON {self.table} (status, entropy DESC, id ASC)"
+        )
+        self._conn.execute(
+            f"CREATE INDEX IF NOT EXISTS {self.table}_idempotency_idx "
+            f"ON {self.table} (idempotency_key)"
         )
 
     # -- write side ------------------------------------------------------------
@@ -162,12 +187,15 @@ class PostgresGround(AbstractGround):
         status: Status | str = Status.RAW,
         metadata: dict[str, Any] | None = None,
         redactor: "Callable[[str], tuple[str, list[str]]] | None" = None,
+        idempotency_key: str | None = None,
     ) -> int:
         """Deposit a new pheromone and return its server-assigned id.
 
         ``redactor`` (``text -> (clean_text, categories)``) is applied to
         ``raw_data`` before it is written, so sensitive data never reaches the
         durable store; any categories are recorded under ``pii_redacted_at_intake``.
+        When ``idempotency_key`` matches an existing non-terminal row, that row's
+        id is returned and nothing new is injected.
         """
         from psycopg.types.json import Jsonb
 
@@ -180,14 +208,34 @@ class PostgresGround(AbstractGround):
             raw_data, redacted = redactor(raw_data)
             if redacted:
                 meta.setdefault("pii_redacted_at_intake", redacted)
+        if idempotency_key is not None:
+            terminal = [s.value for s in TERMINAL_STATUSES]
+            existing = self._conn.execute(
+                f"SELECT id FROM {self.table} "
+                "WHERE idempotency_key = %s AND status <> ALL(%s) "
+                "ORDER BY id DESC LIMIT 1",
+                (idempotency_key, terminal),
+            ).fetchone()
+            if existing is not None:
+                return int(existing["id"])
         row = self._conn.execute(
             f"""
             INSERT INTO {self.table}
-                (raw_data, latent_blob, entropy, status, owner, created_at, updated_at, metadata)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (raw_data, latent_blob, entropy, status, owner, created_at, updated_at, metadata, idempotency_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (raw_data, None, entropy, status.value, None, now, now, Jsonb(meta)),
+            (
+                raw_data,
+                None,
+                entropy,
+                status.value,
+                None,
+                now,
+                now,
+                Jsonb(meta),
+                idempotency_key,
+            ),
         ).fetchone()
         task_id = int(row["id"])
         self._notify("INJECT", task_id)
@@ -200,12 +248,15 @@ class PostgresGround(AbstractGround):
         min_entropy: float = Entropy.MIN,
         status: Status | str | None = None,
         new_status: Status | str = Status.CLAIMED,
+        lease_seconds: float | None = None,
     ) -> Pheromone | None:
         """Atomically grab the most urgent matching pheromone (lock-free).
 
         Uses ``FOR UPDATE SKIP LOCKED`` so concurrent claimants never collide:
         the server hands each caller a different unclaimed row and skips any that
-        a peer already holds. Terminal pheromones are always excluded.
+        a peer already holds. Terminal pheromones are always excluded. A
+        work-lease and the incoming trail (``claimed_from``) are stamped so a
+        crashed worker's task can later be reclaimed.
         """
         self._ensure_open()
         min_entropy = _validate_entropy(min_entropy)
@@ -219,27 +270,74 @@ class PostgresGround(AbstractGround):
             params.append(_coerce_status(status).value)
 
         now = time.time()
+        lease = (
+            self._default_lease_seconds if lease_seconds is None else lease_seconds
+        )
         sql = f"""
             WITH candidate AS (
-                SELECT id FROM {self.table}
+                SELECT id, status FROM {self.table}
                 WHERE {' AND '.join(where)}
                 ORDER BY entropy DESC, id ASC
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
             )
             UPDATE {self.table} AS t
-               SET status = %s, owner = %s, updated_at = %s
+               SET status = %s, owner = %s, updated_at = %s,
+                   lease_expires_at = %s, retry_count = t.retry_count + 1,
+                   claimed_from = candidate.status
               FROM candidate
              WHERE t.id = candidate.id
             RETURNING t.*
         """
-        row = self._conn.execute(sql, (*params, new_status.value, owner, now)).fetchone()
+        row = self._conn.execute(
+            sql, (*params, new_status.value, owner, now, now + lease)
+        ).fetchone()
         if row is None:
             return None
         claimed = self._row_to_pheromone(row)
         self._notify("CLAIM", claimed.id)
         logger.debug("Claimed id=%s by owner=%s -> %s", claimed.id, owner, new_status.value)
         return claimed
+
+    def reclaim_expired_leases(
+        self, *, reclaim_status: Status | str = Status.RAW
+    ) -> list[int]:
+        """Return expired-lease work to the pool so a healthy ant can retry it.
+
+        Mirrors :meth:`PheromoneGround.reclaim_expired_leases`: clears the owner,
+        reverts to ``claimed_from``, bumps ``version`` (invalidating the dead
+        worker's in-flight write) and returns the reclaimed ids.
+        """
+        self._ensure_open()
+        fallback = _coerce_status(reclaim_status).value
+        now = time.time()
+        terminal = [s.value for s in TERMINAL_STATUSES]
+        rows = self._conn.execute(
+            f"""
+            UPDATE {self.table} AS t
+               SET owner = NULL,
+                   status = COALESCE(claimed_from, %s),
+                   lease_expires_at = NULL,
+                   version = version + 1,
+                   updated_at = %s
+             WHERE owner IS NOT NULL
+               AND lease_expires_at IS NOT NULL
+               AND lease_expires_at < %s
+               AND status <> ALL(%s)
+            RETURNING t.id
+            """,
+            (fallback, now, now, terminal),
+        ).fetchall()
+        reclaimed = [int(r["id"]) for r in rows]
+        for task_id in reclaimed:
+            self._notify("MUTATE", task_id)
+        if reclaimed:
+            logger.info(
+                "Reclaimed %d expired-lease pheromone(s): %s",
+                len(reclaimed),
+                reclaimed,
+            )
+        return reclaimed
 
     def update_state(
         self,
@@ -252,11 +350,16 @@ class PostgresGround(AbstractGround):
         owner: str | None = None,
         clear_owner: bool = False,
         metadata: dict[str, Any] | None = None,
+        expected_version: int | None = None,
+        dlq_reason: str | None = None,
+        reset_retries: bool = False,
     ) -> bool:
         """Mutate a pheromone in place; only non-None fields are written.
 
         ``metadata`` replaces the stored blob wholesale (matching the SQLite
-        ground). ``clear_owner=True`` releases the trail back to the colony.
+        ground). ``clear_owner=True`` releases the trail (and its work-lease)
+        back to the colony. Every write bumps ``version``; pass ``expected_version``
+        for an optimistic compare-and-swap that rejects a stale write.
         """
         from psycopg.types.json import Jsonb
 
@@ -275,24 +378,39 @@ class PostgresGround(AbstractGround):
         if latent_blob is not None:
             assignments.append("latent_blob = %s")
             params.append(latent_blob)
+        if dlq_reason is not None:
+            assignments.append("dlq_reason = %s")
+            params.append(dlq_reason)
         if clear_owner:
             assignments.append("owner = NULL")
+            assignments.append("lease_expires_at = NULL")
         elif owner is not None:
             assignments.append("owner = %s")
             params.append(owner)
         if metadata is not None:
             assignments.append("metadata = %s")
             params.append(Jsonb(metadata))
+        if reset_retries:
+            assignments.append("retry_count = 0")
 
+        assignments.append("version = version + 1")
         assignments.append("updated_at = %s")
         params.append(time.time())
-        params.append(int(task_id))
 
-        sql = f"UPDATE {self.table} SET {', '.join(assignments)} WHERE id = %s"
+        where = "id = %s"
+        params.append(int(task_id))
+        if expected_version is not None:
+            where += " AND version = %s"
+            params.append(int(expected_version))
+
+        sql = f"UPDATE {self.table} SET {', '.join(assignments)} WHERE {where}"
         cur = self._conn.execute(sql, params)
         changed = cur.rowcount > 0
         if not changed:
-            logger.warning("update_state() found no pheromone with id=%s", task_id)
+            logger.warning(
+                "update_state() found no pheromone with id=%s (or version conflict)",
+                task_id,
+            )
         else:
             self._notify("MUTATE", int(task_id))
         return changed
@@ -480,4 +598,9 @@ class PostgresGround(AbstractGround):
             created_at=float(row["created_at"]),
             updated_at=float(row["updated_at"]),
             metadata=row.get("metadata") or {},
+            version=int(row.get("version") or 1),
+            retry_count=int(row.get("retry_count") or 0),
+            lease_expires_at=row.get("lease_expires_at"),
+            idempotency_key=row.get("idempotency_key"),
+            dlq_reason=row.get("dlq_reason"),
         )

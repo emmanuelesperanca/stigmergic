@@ -67,6 +67,7 @@ __all__ = [
     "ScriptedExpertOracle",
     "approve_all_oracle",
     "ServiceNowIntakeAnt",
+    "JanitorAnt",
     "KnowledgeSolverAnt",
     "ReviewingVerifierAnt",
     "GardenerAnt",
@@ -197,6 +198,7 @@ class ServiceNowIntakeAnt(ProducerAnt):
                 entropy=Entropy.CHAOS,
                 status=Status.RAW,
                 redactor=redact_pii,
+                idempotency_key=incident.sys_id,
                 metadata={
                     "channel": "servicenow",
                     "sys_id": incident.sys_id,
@@ -216,6 +218,31 @@ class ServiceNowIntakeAnt(ProducerAnt):
                 f"Ingested by {self.name}; dispatched to the HR knowledge swarm.",
             )
             self.log.debug("Ingested %s: %r", incident.number, question)
+
+
+class JanitorAnt(ProducerAnt):
+    """Sweeps expired work-leases, returning a crashed worker's task to the pool.
+
+    Not a cognitive caste: each heartbeat it asks the ground to reclaim any
+    pheromone whose lease has lapsed -- its owner presumably died mid-task -- so
+    a healthy peer can claim the work again. This is what turns the lease into a
+    real crash-recovery guarantee instead of just a timestamp, and it is why one
+    ant crashing never strands a ticket.
+    """
+
+    def __init__(
+        self,
+        env: PheromoneGround,
+        name: str | None = None,
+        *,
+        poll_interval: float = 0.1,
+    ) -> None:
+        super().__init__(env, name, poll_interval=poll_interval)
+
+    def secrete(self) -> None:
+        reclaimed = self.env.reclaim_expired_leases()
+        if reclaimed:
+            self.log.info("Reclaimed abandoned ticket(s): %s", reclaimed)
 
 
 class KnowledgeSolverAnt(ConsumerAnt):

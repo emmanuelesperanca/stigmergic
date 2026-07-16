@@ -73,6 +73,9 @@ class Mutation(BaseModel):
     release_owner: bool = True
     """If ``True``, drop ownership so the next caste can freely claim the trail."""
 
+    expected_version: int | None = None
+    """Optional optimistic-concurrency guard; ``None`` uses the claimed version."""
+
 
 class BaseAnt(abc.ABC):
     """An autonomous worker running a poll loop on a background thread.
@@ -216,6 +219,7 @@ class ConsumerAnt(BaseAnt):
         target_status: Status | str | None = None,
         claimed_status: Status | str = Status.CLAIMED,
         poll_interval: float = 0.5,
+        max_retries: int = 3,
     ) -> None:
         """Configure what this consumer reacts to.
 
@@ -229,11 +233,15 @@ class ConsumerAnt(BaseAnt):
             claimed_status: The intermediate trail stamped while the task is being
                 metabolized, preventing sibling ants from double-claiming it.
             poll_interval: Seconds between heartbeats.
+            max_retries: How many times a task may be claimed before a repeatedly
+                failing (poison-pill) item is parked in the dead-letter queue
+                instead of being retried forever.
         """
         super().__init__(env, name, poll_interval=poll_interval)
         self.entropy_threshold = entropy_threshold
         self.target_status = target_status
         self.claimed_status = claimed_status
+        self.max_retries = max_retries
 
     def tick(self) -> None:
         """Claim one matching pheromone, metabolize it, and commit the result."""
@@ -246,15 +254,49 @@ class ConsumerAnt(BaseAnt):
         if task is None:
             return  # Nothing urgent enough on the ground; sleep again.
 
+        # Poison-pill guard: a task claimed more times than the retry budget is
+        # dead-lettered rather than looped on forever, so one bad item can never
+        # wedge the swarm.
+        if task.retry_count > self.max_retries:
+            self.env.update_state(
+                task.id,
+                entropy=Entropy.MIN,
+                status=Status.DEAD_LETTER,
+                dlq_reason=f"exceeded max_retries={self.max_retries}",
+                clear_owner=True,
+                expected_version=task.version,
+            )
+            self.log.error(
+                "Dead-lettered id=%s after %d attempts.", task.id, task.retry_count
+            )
+            return
+
         self.log.debug("Claimed pheromone id=%s; metabolizing.", task.id)
-        mutation = self.metabolize(task)
+        try:
+            mutation = self.metabolize(task)
+        except Exception:
+            # A failed metabolize must not lose the task: release it for another
+            # attempt (or let its lease expire and be reclaimed). The retry
+            # counter, bumped on every claim, eventually trips the DLQ guard.
+            self.log.exception(
+                "metabolize() raised for id=%s (attempt %d); releasing for retry.",
+                task.id,
+                task.retry_count,
+            )
+            self._release_for_retry(task)
+            return
         if mutation is None:
             # The ant declined to act. Leave the claim in place; a later tick (or
             # operator) can decide what to do. We never silently lose the task.
             self.log.warning("metabolize() returned None for id=%s.", task.id)
             return
 
-        self.env.update_state(
+        guard = (
+            task.version
+            if mutation.expected_version is None
+            else mutation.expected_version
+        )
+        committed = self.env.update_state(
             task.id,
             entropy=mutation.new_entropy,
             status=mutation.new_status,
@@ -262,12 +304,38 @@ class ConsumerAnt(BaseAnt):
             latent_blob=mutation.latent_blob,
             metadata=mutation.metadata,
             clear_owner=mutation.release_owner,
+            expected_version=guard,
+            reset_retries=True,
         )
+        if not committed:
+            # Another worker (e.g. after a lease reclaim) already advanced this
+            # task; our stale write was safely rejected by the version check.
+            self.log.warning(
+                "Mutation for id=%s was superseded (version conflict).", task.id
+            )
+            return
         self.log.debug(
             "Committed mutation for id=%s (entropy=%s status=%s).",
             task.id,
             mutation.new_entropy,
             mutation.new_status.value if mutation.new_status else None,
+        )
+
+    def _release_for_retry(self, task: Pheromone) -> None:
+        """Return a task whose metabolize failed to the pool for another attempt.
+
+        Reverts to this caste's incoming ``target_status`` (so the same caste can
+        re-claim it) and clears ownership. When no specific incoming trail is
+        configured, the task is left claimed and relies on lease expiry +
+        :meth:`PheromoneGround.reclaim_expired_leases` instead.
+        """
+        if self.target_status is None:
+            return
+        self.env.update_state(
+            task.id,
+            status=self.target_status,
+            clear_owner=True,
+            expected_version=task.version,
         )
 
     def _wait_next(self) -> None:

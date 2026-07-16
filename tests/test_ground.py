@@ -39,7 +39,9 @@ from stigmergic_ai.core.environment import (  # noqa: E402
     GroundEvent,
     PheromoneGround,
     Status,
+    TERMINAL_STATUSES,
 )
+from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation  # noqa: E402
 
 _HAS_PSYCOPG = importlib.util.find_spec("psycopg") is not None
 
@@ -57,6 +59,142 @@ def ground():
         yield g
     finally:
         g.close()
+
+
+# -- reliability core: idempotency, optimistic concurrency, leases, DLQ -------
+
+
+class _AlwaysFailsAnt(ConsumerAnt):
+    """A caste whose metabolize always raises -- to exercise the dead-letter path."""
+
+    def metabolize(self, task):  # noqa: ANN001 - test double
+        raise RuntimeError("boom")
+
+
+class _ResolverAnt(ConsumerAnt):
+    """A healthy caste that drives any task it claims straight to RESOLVED."""
+
+    def metabolize(self, task):  # noqa: ANN001 - test double
+        return Mutation(new_status=Status.RESOLVED, new_entropy=Entropy.ZERO)
+
+
+def test_inject_chaos_deduplicates_on_idempotency_key(ground):
+    first = ground.inject_chaos("ticket A", idempotency_key="sys-1")
+    dup = ground.inject_chaos("ticket A re-delivered", idempotency_key="sys-1")
+    assert dup == first  # same key -> same task; no duplicate work is created
+    other = ground.inject_chaos("ticket B", idempotency_key="sys-2")
+    assert other != first
+    assert ground.count() == 2  # only the two distinct tasks exist
+
+    # Once the task reaches a terminal state, its key is free to be reused.
+    ground.update_state(first, status=Status.RESOLVED)
+    reused = ground.inject_chaos("ticket A resubmitted", idempotency_key="sys-1")
+    assert reused != first
+
+
+def test_update_state_optimistic_concurrency_rejects_stale_write(ground):
+    task_id = ground.inject_chaos("x", status=Status.RAW)
+    version0 = ground.get(task_id).version
+
+    # A write carrying a stale expected_version is rejected and changes nothing.
+    assert (
+        ground.update_state(
+            task_id, status=Status.HYGIENIZED, expected_version=version0 + 5
+        )
+        is False
+    )
+    assert ground.get(task_id).status is Status.RAW
+
+    # The current version is accepted and the version is bumped on success.
+    assert (
+        ground.update_state(
+            task_id, status=Status.HYGIENIZED, expected_version=version0
+        )
+        is True
+    )
+    after = ground.get(task_id)
+    assert after.status is Status.HYGIENIZED
+    assert after.version == version0 + 1
+
+
+def test_claim_sets_a_lease_and_reclaim_returns_expired_work(ground):
+    task_id = ground.inject_chaos("work", status=Status.HYGIENIZED)
+    claimed = ground.claim("worker", status=Status.HYGIENIZED, lease_seconds=0.0)
+    assert claimed is not None and claimed.owner == "worker"
+    assert claimed.lease_expires_at is not None
+
+    time.sleep(0.01)  # let the (0-second) lease elapse
+    reclaimed = ground.reclaim_expired_leases()
+    assert reclaimed == [task_id]
+
+    task = ground.get(task_id)
+    assert task.owner is None  # ownership released
+    assert task.status is Status.HYGIENIZED  # reverted to the claimed-from trail
+    assert task.lease_expires_at is None
+    assert task.version > claimed.version  # bumped -> the dead worker's write is stale
+
+
+def test_reclaim_ignores_unexpired_leases(ground):
+    ground.inject_chaos("work", status=Status.HYGIENIZED)
+    claimed = ground.claim("worker", status=Status.HYGIENIZED, lease_seconds=60.0)
+    assert claimed is not None
+    # A healthy, un-expired lease is left alone.
+    assert ground.reclaim_expired_leases() == []
+    assert ground.get(claimed.id).owner == "worker"
+
+
+def test_poison_pill_is_dead_lettered_after_max_retries(ground):
+    task_id = ground.inject_chaos("bad task", status=Status.RAW)
+    ant = _AlwaysFailsAnt(ground, "faildozer", target_status=Status.RAW, max_retries=2)
+
+    # Each tick claims (bumping retry_count), metabolize raises, and the task is
+    # released back to RAW -- until the retry budget is exceeded and it is parked.
+    for _ in range(6):
+        ant.tick()
+
+    task = ground.get(task_id)
+    assert task.status is Status.DEAD_LETTER
+    assert task.owner is None
+    assert task.dlq_reason and "max_retries" in task.dlq_reason
+    # DEAD_LETTER is terminal: no ant will ever pick it up again.
+    assert ground.claim("anyone", status=Status.RAW) is None
+    assert Status.DEAD_LETTER in TERMINAL_STATUSES
+
+
+def test_reclaimed_task_is_completed_by_a_healthy_worker(ground):
+    task_id = ground.inject_chaos("recover me", status=Status.RAW)
+    # A worker claims it with a 0-second lease, then "crashes" (never commits).
+    dead = ground.claim("crashed-worker", status=Status.RAW, lease_seconds=0.0)
+    assert dead is not None and dead.owner == "crashed-worker"
+
+    time.sleep(0.01)
+    # The janitor sweep returns the abandoned task to the RAW pool...
+    assert ground.reclaim_expired_leases() == [task_id]
+    # ...and a healthy worker claims it and drives it to RESOLVED.
+    _ResolverAnt(ground, "healthy", target_status=Status.RAW).tick()
+
+    task = ground.get(task_id)
+    assert task.status is Status.RESOLVED
+    assert task.owner is None
+
+
+def test_enforce_transitions_rejects_an_illegal_hop():
+    ground = PheromoneGround(enforce_transitions=True)
+    try:
+        task_id = ground.inject_chaos("x", status=Status.RAW)
+        # RAW may only advance to CLAIMED / HYGIENIZED / DEAD_LETTER.
+        with pytest.raises(ValueError, match="Illegal transition"):
+            ground.update_state(task_id, status=Status.RESOLVED)
+        # A permitted hop still goes through.
+        assert ground.update_state(task_id, status=Status.HYGIENIZED) is True
+    finally:
+        ground.close()
+
+
+def test_transitions_unenforced_by_default(ground):
+    # The default ground does not police the lifecycle (backward compatible).
+    task_id = ground.inject_chaos("x", status=Status.RAW)
+    assert ground.update_state(task_id, status=Status.RESOLVED) is True
 
 
 # -- event emission -----------------------------------------------------------
@@ -320,6 +458,38 @@ def test_pg_update_state_drives_entropy_to_zero(pg_ground) -> None:
     assert pg_ground.global_entropy() == pytest.approx(0.0)
     # A terminal pheromone is excluded from the claimable set.
     assert pg_ground.claim("w") is None
+
+
+@requires_pg
+def test_pg_reliability_idempotency_cas_and_reclaim(pg_ground) -> None:
+    # Idempotency: the same key returns the same task, never a duplicate.
+    first = pg_ground.inject_chaos("ticket", idempotency_key="k1")
+    assert pg_ground.inject_chaos("ticket re-delivered", idempotency_key="k1") == first
+    assert pg_ground.count() == 1
+
+    # Optimistic concurrency: a stale expected_version is rejected, current wins.
+    version0 = pg_ground.get(first).version
+    assert (
+        pg_ground.update_state(
+            first, status=Status.HYGIENIZED, expected_version=version0 + 9
+        )
+        is False
+    )
+    assert (
+        pg_ground.update_state(
+            first, status=Status.HYGIENIZED, expected_version=version0
+        )
+        is True
+    )
+    assert pg_ground.get(first).version == version0 + 1
+
+    # Lease + reclaim: a 0-second lease is swept back to the claimed-from trail.
+    claimed = pg_ground.claim("dead", status=Status.HYGIENIZED, lease_seconds=0.0)
+    assert claimed is not None and claimed.owner == "dead"
+    time.sleep(0.01)
+    assert pg_ground.reclaim_expired_leases() == [first]
+    recovered = pg_ground.get(first)
+    assert recovered.owner is None and recovered.status is Status.HYGIENIZED
 
 
 @requires_pg
