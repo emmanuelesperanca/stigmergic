@@ -1,4 +1,4 @@
-# StigmergicAI — Positioning One-Pager
+# Stigmergic — Positioning One-Pager
 
 > **Category:** Operational Entropy Management *(StigOps)*
 > **Tagline:** The decomposer layer for the endless rain of events your automation can't keep up with.
@@ -7,7 +7,7 @@
 
 ## The one-line pitch
 
-**Every enterprise has a forest floor: an infinite rain of events — tickets, invoices, alerts, claims — that traditional automation can't keep up with. StigmergicAI is the ecosystem of decomposers that digests that chaos into resolved, audited order, continuously — and never loses a leaf, even when the systems above it crash.**
+**Every enterprise has a forest floor: an infinite rain of events — tickets, invoices, alerts, claims — that traditional automation can't keep up with. Stigmergic is the ecosystem of decomposers that digests that chaos into resolved, audited order, continuously — and never loses a leaf, even when the systems above it crash.**
 
 ---
 
@@ -26,7 +26,7 @@ Neither option is a *system for continuously digesting consequential events at v
 
 ## The insight
 
-Nature solved high-volume, no-orchestrator, fault-tolerant decomposition a billion years ago. StigmergicAI ports three of its mechanisms into software:
+Nature solved high-volume, no-orchestrator, fault-tolerant decomposition a billion years ago. Stigmergic ports three of its mechanisms into software:
 
 | Horizon | In nature | What it gives you |
 | :--- | :--- | :--- |
@@ -50,7 +50,7 @@ Most "agent" pitches are poetry. Ours compiles:
 
 ## Who it's for — the forest-floor qualifier
 
-A problem belongs to StigmergicAI when it has these **seven traits**:
+A problem belongs to Stigmergic when it has these **seven traits**:
 
 1. A stable, queryable **"ground"** of truth (KB, policy, ERP state, ledger).
 2. A **continuous, unpredictable** arrival of events, in bursts, with no natural end.
@@ -84,7 +84,7 @@ The framework is **general** (it markets a *class* of problems). The go-to-marke
 
 ## Differentiation
 
-| | Commercial orchestrators (LangChain / CrewAI) | Guardrail libraries (Guardrails / NeMo) | **StigmergicAI** |
+| | Commercial orchestrators (LangChain / CrewAI) | Guardrail libraries (Guardrails / NeMo) | **Stigmergic** |
 | :--- | :--- | :--- | :--- |
 | **Mental model** | A corporation (supervisor + nodes) | A filter on one call | An **organism** (decentralized swarm) |
 | **Failure mode** | Supervisor crash = lost state | Single-model, single-point check | DB-durable state; **Byzantine quorum** |

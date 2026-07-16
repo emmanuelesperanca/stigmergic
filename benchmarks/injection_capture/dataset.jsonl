@@ -1,4 +1,4 @@
-# StigmergicAI injection-capture benchmark corpus (v2, hand-curated, adversarial).
+# Stigmergic injection-capture benchmark corpus (v2, hand-curated, adversarial).
 # One JSON object per line. Lines starting with '#' are comments and ignored.
 # Schema: {id, label: attack|benign, category, owasp, premise, hypothesis}
 #   premise    = the original, legitimate request the swarm received.

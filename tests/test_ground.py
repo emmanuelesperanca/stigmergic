@@ -32,8 +32,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from stigmergic_ai.core.backends import create_ground  # noqa: E402
-from stigmergic_ai.core.environment import (  # noqa: E402
+from stigmergic.core.backends import create_ground  # noqa: E402
+from stigmergic.core.environment import (  # noqa: E402
     AbstractGround,
     Entropy,
     GroundEvent,
@@ -41,7 +41,7 @@ from stigmergic_ai.core.environment import (  # noqa: E402
     Status,
     TERMINAL_STATUSES,
 )
-from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation  # noqa: E402
+from stigmergic.agents.base_ant import ConsumerAnt, Mutation  # noqa: E402
 
 _HAS_PSYCOPG = importlib.util.find_spec("psycopg") is not None
 
@@ -342,14 +342,14 @@ def test_factory_unknown_scheme_raises_value_error() -> None:
 
 def test_postgres_module_imports_without_psycopg() -> None:
     # Importing the backend module must not drag the driver into the process.
-    import stigmergic_ai.core.backends.postgres as pg  # noqa: F401
+    import stigmergic.core.backends.postgres as pg  # noqa: F401
 
     if not _HAS_PSYCOPG:
         assert "psycopg" not in sys.modules
 
 
 def test_postgres_ground_conforms_to_abstract_contract() -> None:
-    from stigmergic_ai.core.backends.postgres import PostgresGround
+    from stigmergic.core.backends.postgres import PostgresGround
 
     assert issubclass(PostgresGround, AbstractGround)
     assert PostgresGround.__abstractmethods__ == frozenset()
@@ -357,7 +357,7 @@ def test_postgres_ground_conforms_to_abstract_contract() -> None:
 
 @pytest.mark.skipif(_HAS_PSYCOPG, reason="psycopg is installed; the driver import would succeed")
 def test_postgres_ground_raises_clean_error_without_driver() -> None:
-    from stigmergic_ai.core.backends.postgres import PostgresGround
+    from stigmergic.core.backends.postgres import PostgresGround
 
     with pytest.raises(ImportError) as excinfo:
         PostgresGround("postgresql://user:pw@localhost/db")
@@ -366,7 +366,7 @@ def test_postgres_ground_raises_clean_error_without_driver() -> None:
 
 @pytest.mark.parametrize("bad", ["pheromones; DROP TABLE x", "1nvalid", "a-b", "has space", ""])
 def test_postgres_rejects_unsafe_identifiers(bad: str) -> None:
-    from stigmergic_ai.core.backends.postgres import _safe_ident
+    from stigmergic.core.backends.postgres import _safe_ident
 
     with pytest.raises(ValueError):
         _safe_ident(bad, kind="table")
@@ -374,7 +374,7 @@ def test_postgres_rejects_unsafe_identifiers(bad: str) -> None:
 
 @pytest.mark.parametrize("ok", ["pheromones", "_p", "events_v2", "Channel1"])
 def test_postgres_accepts_safe_identifiers(ok: str) -> None:
-    from stigmergic_ai.core.backends.postgres import _safe_ident
+    from stigmergic.core.backends.postgres import _safe_ident
 
     assert _safe_ident(ok, kind="table") == ok
 
@@ -395,7 +395,7 @@ requires_pg = pytest.mark.skipif(
 
 @pytest.fixture()
 def pg_ground():
-    from stigmergic_ai.core.backends.postgres import PostgresGround
+    from stigmergic.core.backends.postgres import PostgresGround
 
     g = PostgresGround(
         _PG_DSN,

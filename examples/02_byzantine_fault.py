@@ -25,14 +25,14 @@ import time
 # without first running `pip install -e .`.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from stigmergic_ai.agents.concrete import (  # noqa: E402
+from stigmergic.agents.concrete import (  # noqa: E402
     ForagerAnt,
     GovernanceAnt,
     SolverAnt,
 )
-from stigmergic_ai.agents.verifier_ant import VerifierAnt  # noqa: E402
-from stigmergic_ai.core.consensus import MockNLIJudge  # noqa: E402
-from stigmergic_ai.core.environment import (  # noqa: E402
+from stigmergic.agents.verifier_ant import VerifierAnt  # noqa: E402
+from stigmergic.core.consensus import MockNLIJudge  # noqa: E402
+from stigmergic.core.environment import (  # noqa: E402
     PheromoneGround,
     Status,
 )
@@ -70,7 +70,7 @@ def main() -> None:
     swarm = [forager, governance, solver_a, solver_b, verifier]
 
     print("=" * 74)
-    print("  StigmergicAI -- Byzantine Fault demo")
+    print("  Stigmergic -- Byzantine Fault demo")
     print("  swarm: 1 Forager, 1 Governance, 2 Solvers, 1 Verifier (Mock NLI quorum)")
     print("=" * 74)
 

@@ -1,6 +1,6 @@
 # ServiceNow HR Desk — a self-healing knowledge base that resists poison
 
-A real-world application of **StigmergicAI**: an HR help desk built on a mock
+A real-world application of **Stigmergic**: an HR help desk built on a mock
 [ServiceNow](https://www.servicenow.com/) ITSM instance, backed by a vector
 knowledge base (a literal "forest floor"), staffed by a swarm of ants that turn
 tickets into knowledge — and defended by a Byzantine consensus quorum that

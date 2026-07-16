@@ -1,4 +1,4 @@
-"""Core substrate of StigmergicAI: the shared field the swarm lives in.
+"""Core substrate of Stigmergic: the shared field the swarm lives in.
 
 This subpackage holds the Horizon 1 environment -- the :class:`PheromoneGround`
 and its value types. It is intentionally free of any deep-learning dependency so
@@ -9,8 +9,8 @@ for tensor injection) are *not* re-exported here; import them explicitly when yo
 opt into the heavier horizons.
 """
 
-from stigmergic_ai.core.backends import create_ground
-from stigmergic_ai.core.environment import (
+from stigmergic.core.backends import create_ground
+from stigmergic.core.environment import (
     AbstractGround,
     Entropy,
     EventSignal,
@@ -19,7 +19,7 @@ from stigmergic_ai.core.environment import (
     PheromoneGround,
     Status,
 )
-from stigmergic_ai.core.observability import SwarmInspector
+from stigmergic.core.observability import SwarmInspector
 
 __all__ = [
     "AbstractGround",

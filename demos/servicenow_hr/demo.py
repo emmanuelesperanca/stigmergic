@@ -38,9 +38,9 @@ for _p in (_HERE, _SRC):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from stigmergic_ai.agents.concrete import GovernanceAnt  # noqa: E402
-from stigmergic_ai.core.environment import PheromoneGround, Status  # noqa: E402
-from stigmergic_ai.core.observability import SwarmInspector  # noqa: E402
+from stigmergic.agents.concrete import GovernanceAnt  # noqa: E402
+from stigmergic.core.environment import PheromoneGround, Status  # noqa: E402
+from stigmergic.core.observability import SwarmInspector  # noqa: E402
 
 from ants import (  # noqa: E402
     GardenerAnt,
@@ -266,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     print(RULE)
-    print("  StigmergicAI -- ServiceNow HR desk: learn, self-heal, resist injection")
+    print("  Stigmergic -- ServiceNow HR desk: learn, self-heal, resist injection")
     print(RULE)
 
     # 1. Seed the soil ---------------------------------------------------------

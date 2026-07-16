@@ -23,8 +23,8 @@ from __future__ import annotations
 import random
 import re
 
-from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation, ProducerAnt
-from stigmergic_ai.core.environment import (
+from stigmergic.agents.base_ant import ConsumerAnt, Mutation, ProducerAnt
+from stigmergic.core.environment import (
     Entropy,
     Pheromone,
     PheromoneGround,

@@ -1,6 +1,6 @@
 # Threat Model
 
-> What StigmergicAI defends against, *where* in the code each control lives, and
+> What Stigmergic defends against, *where* in the code each control lives, and
 > — kept deliberately honest — what it does **not** cover. Framed against the
 > [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/).
 > Claims marked *measured* are reproduced by
@@ -35,14 +35,14 @@
 
 | OWASP risk | Vector here | Control (where) | Status |
 | :--- | :--- | :--- | :--- |
-| **LLM01 — Prompt Injection** | Hostile instructions in a ticket ("ignore previous… drop table…") reach a solver's proposal | Heterogeneous **`SemanticRaft` quorum** slashes a proposal that does not follow from the premise, **before** any writeback ([consensus.py](src/stigmergic_ai/core/consensus.py), [verifier_ant.py](src/stigmergic_ai/agents/verifier_ant.py)) | ✅ *measured* — 45%→82% capture at equal FPR |
-| **LLM02 — Sensitive Info Disclosure** | Email/SSN/card/phone inside raw event text leaking into store, logs, traces | **PII redaction before the first durable write** via the `redactor` hook on `inject_chaos` ([environment.py](src/stigmergic_ai/core/environment.py), `redact_pii` in [concrete.py](src/stigmergic_ai/agents/concrete.py)) | ✅ design control + tests |
+| **LLM01 — Prompt Injection** | Hostile instructions in a ticket ("ignore previous… drop table…") reach a solver's proposal | Heterogeneous **`SemanticRaft` quorum** slashes a proposal that does not follow from the premise, **before** any writeback ([consensus.py](src/stigmergic/core/consensus.py), [verifier_ant.py](src/stigmergic/agents/verifier_ant.py)) | ✅ *measured* — 45%→82% capture at equal FPR |
+| **LLM02 — Sensitive Info Disclosure** | Email/SSN/card/phone inside raw event text leaking into store, logs, traces | **PII redaction before the first durable write** via the `redactor` hook on `inject_chaos` ([environment.py](src/stigmergic/core/environment.py), `redact_pii` in [concrete.py](src/stigmergic/agents/concrete.py)) | ✅ design control + tests |
 | **LLM04 — Data & Model Poisoning** | A malicious ticket auto-resolved would teach the KB; a wrong answer served forever | **Consensus-gated writeback** (nothing reaches the KB unslashed) + **quarantine-not-delete** with provenance, audit log, and rollback ([knowledge_ground.py](demos/servicenow_hr/knowledge_ground.py)) | ✅ design control + tests |
 | **LLM05 — Improper Output Handling** | A generative string treated as a trusted command/effect | **Propose / judge / execute are separate castes**; a proposal is inert data until a policy passes | ✅ invariant |
 | **LLM06 — Excessive Agency** | An autonomous agent taking a consequential action alone | **`PENDING_HUMAN` gate** for high-risk work + capability separation (a proposer cannot execute) | ✅ design control |
 | **LLM08 — Vector/Embedding Weakness** | Stale, contradictory, or quarantined knowledge still being retrieved | **Active-only retrieval** (quarantined/expired rows excluded) + per-entry provenance/confidence/expiry ([knowledge_ground.py](demos/servicenow_hr/knowledge_ground.py)) | ✅ design control + tests |
 | **LLM09 — Misinformation (overreliance)** | Trusting one model's confident-but-wrong answer | **Uncorrelated quorum** (rule + NLI + LLM jurors) + human sign-off; benchmark shows a lone "real" model over-blocks and needs consensus | ✅ *measured* (`--nli`) |
-| **LLM10 — Unbounded Consumption** | A poison-pill looping forever; runaway reprocessing | **Bounded retries → `DEAD_LETTER`**, **work-leases**, and idempotent injection cap the blast radius ([environment.py](src/stigmergic_ai/core/environment.py), [base_ant.py](src/stigmergic_ai/agents/base_ant.py)) | ✅ design control + tests |
+| **LLM10 — Unbounded Consumption** | A poison-pill looping forever; runaway reprocessing | **Bounded retries → `DEAD_LETTER`**, **work-leases**, and idempotent injection cap the blast radius ([environment.py](src/stigmergic/core/environment.py), [base_ant.py](src/stigmergic/agents/base_ant.py)) | ✅ design control + tests |
 
 ---
 

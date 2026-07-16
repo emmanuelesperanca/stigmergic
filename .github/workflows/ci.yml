@@ -1,4 +1,4 @@
-# Continuous Integration for StigmergicAI.
+# Continuous Integration for Stigmergic.
 #
 # Five independent job groups enforce the project's promises on every push to
 # main and every pull request:

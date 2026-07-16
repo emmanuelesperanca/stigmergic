@@ -2,7 +2,7 @@
 
 Conventional multi-agent systems pay a **String Tax**: every handoff forces a
 model to compress its rich internal state into lossy text, which the next model
-must re-read and re-encode. StigmergicAI lets ants skip that entirely. A Reader
+must re-read and re-encode. Stigmergic lets ants skip that entirely. A Reader
 can distill a heavy document into the hidden-state tensor of its final layer and
 park those raw activations on the Pheromone Ground; a downstream ant injects that
 tensor straight into its own residual stream. No tokens, no re-reading, no loss.
@@ -13,7 +13,7 @@ from the ``bytes`` that live in the ``latent_blob`` SQLite column, via
 
 It honours the framework's lightweight-core philosophy: **torch is imported
 lazily**, only when a tensor is actually (de)serialized. Importing this module --
-or :mod:`stigmergic_ai` -- never drags in the deep-learning stack. Install it with
+or :mod:`stigmergic` -- never drags in the deep-learning stack. Install it with
 ``pip install -e ".[cognition]"``.
 
 Security note: :func:`deserialize_tensor` defaults to ``weights_only=True`` so a
@@ -38,7 +38,7 @@ __all__ = [
     "tensor_fingerprint",
 ]
 
-logger = logging.getLogger("stigmergic_ai.latent_transfer")
+logger = logging.getLogger("stigmergic.latent_transfer")
 
 _MISSING_TORCH_MSG = (
     "Latent State Transfer needs the deep-learning extras (torch). "

@@ -4,16 +4,16 @@ Horizon 1 ships a single-file SQLite ground -- perfect for a laptop, a demo, or
 a single-process swarm. Real deployments outgrow it: SQLite is single-writer and
 its only "notification" is a poll loop. This package lets you swap the substrate
 without touching a single ant, because every backend implements the same
-:class:`~stigmergic_ai.core.environment.AbstractGround` contract.
+:class:`~stigmergic.core.environment.AbstractGround` contract.
 
 * :func:`create_ground` -- a tiny factory that turns a DSN string into the right
   backend (``sqlite://``, ``postgresql://``, ...).
-* :class:`~stigmergic_ai.core.backends.postgres.PostgresGround` -- a production
+* :class:`~stigmergic.core.backends.postgres.PostgresGround` -- a production
   ground using ``SELECT ... FOR UPDATE SKIP LOCKED`` for lock-free concurrent
   claims and ``LISTEN/NOTIFY`` for true push (no polling) across processes.
 
 Heavy drivers (``psycopg``, ``redis``, ``boto3``) are imported lazily inside the
-backend that needs them, so importing this package -- or ``stigmergic_ai`` --
+backend that needs them, so importing this package -- or ``stigmergic`` --
 never pulls a database driver into memory.
 """
 
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 if TYPE_CHECKING:  # avoid importing the concrete grounds at module import time
-    from stigmergic_ai.core.environment import AbstractGround
+    from stigmergic.core.environment import AbstractGround
 
 __all__ = ["create_ground"]
 
@@ -45,9 +45,9 @@ def create_ground(dsn: str = "sqlite://:memory:", **kwargs: object) -> "Abstract
 
     * ``sqlite://:memory:`` or ``sqlite:////abs/path/swarm.db`` or a bare
       filesystem path (``swarm.db``) -> the SQLite
-      :class:`~stigmergic_ai.core.environment.PheromoneGround`.
+      :class:`~stigmergic.core.environment.PheromoneGround`.
     * ``postgresql://user:pass@host:5432/dbname`` -> the
-      :class:`~stigmergic_ai.core.backends.postgres.PostgresGround`.
+      :class:`~stigmergic.core.backends.postgres.PostgresGround`.
 
     Args:
         dsn: A connection string whose scheme picks the backend.
@@ -56,7 +56,7 @@ def create_ground(dsn: str = "sqlite://:memory:", **kwargs: object) -> "Abstract
 
     Returns:
         A ready-to-use ground implementing
-        :class:`~stigmergic_ai.core.environment.AbstractGround`.
+        :class:`~stigmergic.core.environment.AbstractGround`.
 
     Raises:
         NotImplementedError: For a scheme that is on the roadmap but unshipped.
@@ -65,7 +65,7 @@ def create_ground(dsn: str = "sqlite://:memory:", **kwargs: object) -> "Abstract
     # A bare filesystem path (no "://") is always a SQLite file. Handle it before
     # urlsplit, which would misread a Windows drive letter ("C:") as a scheme.
     if "://" not in dsn:
-        from stigmergic_ai.core.environment import PheromoneGround
+        from stigmergic.core.environment import PheromoneGround
 
         return PheromoneGround(dsn or ":memory:", **kwargs)  # type: ignore[arg-type]
 
@@ -74,7 +74,7 @@ def create_ground(dsn: str = "sqlite://:memory:", **kwargs: object) -> "Abstract
 
     if scheme in ("sqlite", "file"):
         # Local SQLite. Resolve ":memory:" vs a filesystem path from the DSN.
-        from stigmergic_ai.core.environment import PheromoneGround
+        from stigmergic.core.environment import PheromoneGround
 
         if ":memory:" in dsn:
             path = ":memory:"
@@ -87,7 +87,7 @@ def create_ground(dsn: str = "sqlite://:memory:", **kwargs: object) -> "Abstract
         return PheromoneGround(path, **kwargs)  # type: ignore[arg-type]
 
     if scheme in ("postgresql", "postgres"):
-        from stigmergic_ai.core.backends.postgres import PostgresGround
+        from stigmergic.core.backends.postgres import PostgresGround
 
         return PostgresGround(dsn, **kwargs)  # type: ignore[arg-type]
 

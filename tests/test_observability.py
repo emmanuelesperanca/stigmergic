@@ -1,8 +1,8 @@
 """Pytest suite for the Swarm Inspector observability layer.
 
 Dependency-free and fast: it drives a real in-memory
-:class:`~stigmergic_ai.core.environment.PheromoneGround`, attaches a
-:class:`~stigmergic_ai.core.observability.SwarmInspector`, and asserts the
+:class:`~stigmergic.core.environment.PheromoneGround`, attaches a
+:class:`~stigmergic.core.observability.SwarmInspector`, and asserts the
 recorder's queries -- lifecycle, entropy series, sparkline, stats, replay -- as
 well as its sinks and context-manager hygiene.
 """
@@ -17,8 +17,8 @@ import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from stigmergic_ai.core.environment import Entropy, PheromoneGround, Status  # noqa: E402
-from stigmergic_ai.core.observability import SwarmInspector  # noqa: E402
+from stigmergic.core.environment import Entropy, PheromoneGround, Status  # noqa: E402
+from stigmergic.core.observability import SwarmInspector  # noqa: E402
 
 
 @pytest.fixture()

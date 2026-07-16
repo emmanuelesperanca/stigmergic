@@ -9,7 +9,7 @@ A :class:`HybridSolverAnt` is a Solver that can run on either side of the
   result in metadata. This is the lossy-but-universal path.
 * ``engine="local"`` -- it runs a local ``transformers`` model, performs a forward
   pass with ``output_hidden_states=True``, extracts the final layer's activation
-  tensor, serializes it via :mod:`stigmergic_ai.core.latent_transfer`, and attaches
+  tensor, serializes it via :mod:`stigmergic.core.latent_transfer`, and attaches
   it to the pheromone's ``latent_blob``. This is the zero-loss Latent State
   Transfer path -- pure mathematical context for a downstream ant to inject.
 
@@ -26,14 +26,14 @@ from __future__ import annotations
 import threading
 from typing import Any, Callable
 
-from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation
-from stigmergic_ai.core.environment import (
+from stigmergic.agents.base_ant import ConsumerAnt, Mutation
+from stigmergic.core.environment import (
     Entropy,
     Pheromone,
     PheromoneGround,
     Status,
 )
-from stigmergic_ai.core.latent_transfer import serialize_tensor, tensor_fingerprint
+from stigmergic.core.latent_transfer import serialize_tensor, tensor_fingerprint
 
 __all__ = ["DEFAULT_LOCAL_MODEL", "DEFAULT_CLOUD_MODEL", "HybridSolverAnt"]
 

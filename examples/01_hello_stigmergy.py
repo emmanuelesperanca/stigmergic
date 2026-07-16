@@ -5,7 +5,7 @@ Run it directly::
     python examples/01_hello_stigmergy.py
 
 This is the README's "Chaos Monkey" demo -- the smallest possible proof that a
-StigmergicAI swarm coordinates purely through a shared environment, with *no*
+Stigmergic swarm coordinates purely through a shared environment, with *no*
 agent ever calling another, and survives having a worker thread killed
 mid-flight.
 
@@ -39,9 +39,9 @@ import time
 # without first running `pip install -e .`.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation  # noqa: E402
-from stigmergic_ai.agents.concrete import ForagerAnt, GovernanceAnt  # noqa: E402
-from stigmergic_ai.core.environment import (  # noqa: E402
+from stigmergic.agents.base_ant import ConsumerAnt, Mutation  # noqa: E402
+from stigmergic.agents.concrete import ForagerAnt, GovernanceAnt  # noqa: E402
+from stigmergic.core.environment import (  # noqa: E402
     Entropy,
     Pheromone,
     PheromoneGround,
@@ -56,7 +56,7 @@ class SolverAnt(ConsumerAnt):
     and drives the pheromone straight to :attr:`Status.RESOLVED` at zero entropy.
 
     This is deliberately simpler than the Byzantine-pipeline
-    :class:`stigmergic_ai.agents.concrete.SolverAnt`, which instead *stages* its
+    :class:`stigmergic.agents.concrete.SolverAnt`, which instead *stages* its
     proposal at ``PENDING_CONSENSUS`` for a Verifier quorum to adjudicate. Here
     there is no quorum -- this is the pure-stigmergy demo -- so the Solver simply
     finalizes its own work.
@@ -121,7 +121,7 @@ def main() -> None:
     solver = SolverAnt(ground, "solver", poll_interval=0.1)
 
     print("=" * 74)
-    print("  StigmergicAI -- Hello, Stigmergy (the Chaos Monkey test)")
+    print("  Stigmergic -- Hello, Stigmergy (the Chaos Monkey test)")
     print("  Forager (produces) -> Governance (sanitizes) -> Solver (resolves)")
     print("  No ant calls another. They share only the Pheromone Ground.")
     print("=" * 74)

@@ -40,11 +40,11 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation, ProducerAnt
-from stigmergic_ai.agents.concrete import redact_pii
-from stigmergic_ai.agents.verifier_ant import VerifierAnt
-from stigmergic_ai.core.consensus import MockNLIJudge, NLIJudge, SemanticRaft
-from stigmergic_ai.core.environment import (
+from stigmergic.agents.base_ant import ConsumerAnt, Mutation, ProducerAnt
+from stigmergic.agents.concrete import redact_pii
+from stigmergic.agents.verifier_ant import VerifierAnt
+from stigmergic.core.consensus import MockNLIJudge, NLIJudge, SemanticRaft
+from stigmergic.core.environment import (
     Entropy,
     Pheromone,
     PheromoneGround,

@@ -26,7 +26,7 @@ import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
-from stigmergic_ai.core.environment import (
+from stigmergic.core.environment import (
     AbstractGround,
     Entropy,
     EventSignal,
@@ -41,7 +41,7 @@ from stigmergic_ai.core.environment import (
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import psycopg
 
-logger = logging.getLogger("stigmergic_ai.backends.postgres")
+logger = logging.getLogger("stigmergic.backends.postgres")
 
 #: Identifiers (table/channel) are interpolated into SQL -- they cannot be bound
 #: as parameters -- so they are validated against this allow-list to slam the
@@ -57,7 +57,7 @@ def _require_psycopg() -> "psycopg":
         raise ImportError(
             "PostgresGround requires the psycopg driver. Install it with:\n"
             "    pip install 'psycopg[binary]>=3.2'\n"
-            "(or add the 'postgres' extra: pip install 'stigmergic-ai[postgres]')."
+            "(or add the 'postgres' extra: pip install 'stigmergic[postgres]')."
         ) from exc
     return psycopg
 
@@ -76,7 +76,7 @@ class PostgresGround(AbstractGround):
     """A Pheromone Ground on PostgreSQL with ``SKIP LOCKED`` claims and ``NOTIFY``.
 
     The agent-facing surface is byte-for-byte identical to the SQLite
-    :class:`~stigmergic_ai.core.environment.PheromoneGround`; only the substrate
+    :class:`~stigmergic.core.environment.PheromoneGround`; only the substrate
     changes. A dedicated background connection holds a ``LISTEN`` and rebroadcasts
     every server notification onto the local :class:`EventSignal`, so both
     event-driven ants (:meth:`wait_for_change`) and the Swarm Inspector work

@@ -37,7 +37,7 @@ from harness import (  # noqa: E402
     stub_llm_complete,
     wilson_interval,
 )
-from stigmergic_ai.core.consensus import (  # noqa: E402
+from stigmergic.core.consensus import (  # noqa: E402
     CONTRADICTION,
     ENTAILMENT,
     MockNLIJudge,

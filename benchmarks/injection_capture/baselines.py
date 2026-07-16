@@ -2,7 +2,7 @@
 
 The benchmark's whole point is an *apples-to-apples* comparison: because every
 control implements the same ``Defense`` shape (``run(item) -> DefenseResult``),
-the StigmergicAI quorum can be scored on the identical corpus against the two
+the Stigmergic quorum can be scored on the identical corpus against the two
 most-cited commercial guardrail tools -- **Guardrails AI** and **NeMo
 Guardrails** -- with no special-casing.
 

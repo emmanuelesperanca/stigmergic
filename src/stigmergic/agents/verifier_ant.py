@@ -2,7 +2,7 @@
 
 A :class:`VerifierAnt` is the immune system of the swarm. It smells the
 ``PENDING_CONSENSUS`` trail -- proposals a Solver has staged but not committed --
-claims one, and submits it to the :class:`~stigmergic_ai.core.consensus.SemanticRaft`
+claims one, and submits it to the :class:`~stigmergic.core.consensus.SemanticRaft`
 quorum. The quorum's ruling is final and binary:
 
 * **Quorum passes** -> the proposal was logically entailed by the request. The
@@ -16,19 +16,19 @@ calls the Solver that produced the proposal, and the Solver never waits on it.
 The verifier simply reacts to a chemical trail and lays a terminal one.
 
 The NLI model is loaded lazily and shared process-wide (see
-:mod:`stigmergic_ai.core.consensus`), so constructing a verifier -- or a whole
+:mod:`stigmergic.core.consensus`), so constructing a verifier -- or a whole
 swarm of them -- is cheap and torch-free until the first real verdict.
 """
 
 from __future__ import annotations
 
-from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation
-from stigmergic_ai.core.consensus import (
+from stigmergic.agents.base_ant import ConsumerAnt, Mutation
+from stigmergic.core.consensus import (
     DEFAULT_NLI_MODEL,
     NLIJudge,
     SemanticRaft,
 )
-from stigmergic_ai.core.environment import (
+from stigmergic.core.environment import (
     Entropy,
     Pheromone,
     PheromoneGround,

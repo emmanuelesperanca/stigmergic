@@ -3,7 +3,7 @@
 The benchmark runs fully offline by default. This module is only imported when a
 caller passes ``--llm`` to :mod:`run`, and it turns an OpenAI-compatible endpoint
 into the ``complete(prompt) -> str`` callable that
-:class:`~stigmergic_ai.core.consensus.LLMJudge` expects.
+:class:`~stigmergic.core.consensus.LLMJudge` expects.
 
 Two providers are supported, both configured purely through environment
 variables (never hardcode a key):

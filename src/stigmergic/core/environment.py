@@ -1,4 +1,4 @@
-"""The Pheromone Ground: the shared semantic field of the StigmergicAI swarm.
+"""The Pheromone Ground: the shared semantic field of the Stigmergic swarm.
 
 In stigmergy, organisms do not communicate directly. They modify a shared
 environment, and *the environment itself* coordinates their collective
@@ -48,7 +48,7 @@ __all__ = [
     "STATE_TRANSITIONS",
 ]
 
-logger = logging.getLogger("stigmergic_ai.environment")
+logger = logging.getLogger("stigmergic.environment")
 
 
 class Status(str, Enum):

@@ -1,4 +1,4 @@
-# 🐜 StigmergicAI
+# 🐜 Stigmergic
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -8,11 +8,11 @@
 >
 > *The decomposer layer for **operational entropy** — the endless rain of tickets, invoices, and alerts that traditional automation can't keep up with.*
 
-Forget API chaining, central orchestrators, and fragile `Agent-A → Agent-B` string-passing. **StigmergicAI** reimagines Multi-Agent Systems (MAS) not as corporate org charts, but as **living ecosystems**.
+Forget API chaining, central orchestrators, and fragile `Agent-A → Agent-B` string-passing. **Stigmergic** reimagines Multi-Agent Systems (MAS) not as corporate org charts, but as **living ecosystems**.
 
-Nature solved distributed computing 500 million years before we invented the CPU. Ant colonies coordinate thousands of workers with no manager. Your immune system runs a planet-scale security audit with no central firewall. Your neurons exchange thought without ever flattening it into words. **StigmergicAI is a shameless plagiarism of that biology** — three battle-tested survival strategies, ported into a framework for LLM agents.
+Nature solved distributed computing 500 million years before we invented the CPU. Ant colonies coordinate thousands of workers with no manager. Your immune system runs a planet-scale security audit with no central firewall. Your neurons exchange thought without ever flattening it into words. **Stigmergic is a shameless plagiarism of that biology** — three battle-tested survival strategies, ported into a framework for LLM agents.
 
-If LangGraph is a rigid assembly line, StigmergicAI is an ant colony: decentralized, self-healing, and consensus-guarded against hallucination and prompt injection.
+If LangGraph is a rigid assembly line, Stigmergic is an ant colony: decentralized, self-healing, and consensus-guarded against hallucination and prompt injection.
 
 ---
 
@@ -29,11 +29,11 @@ Biology never made these mistakes. Neither should your agents.
 
 ## 🌳 Forest-Floor Problems
 
-> *Where StigmergicAI earns its keep.*
+> *Where Stigmergic earns its keep.*
 
 Walk into any enterprise and you'll find a **forest floor**: an endless rain of events — support tickets, invoices, fraud alerts, SAP exceptions, security alarms, insurance claims — falling faster than humans (or traditional automation) can clear them. Leaves never stop dropping. There is no "end of project," only a steady state of decay that must be continuously digested.
 
-Nature has a name for the layer that handles exactly this: **decomposers**. StigmergicAI is the decomposer layer for your **operational entropy** — a swarm that digests the chaos into resolved, *audited* order, continuously, and never loses a leaf even when the systems above it crash.
+Nature has a name for the layer that handles exactly this: **decomposers**. Stigmergic is the decomposer layer for your **operational entropy** — a swarm that digests the chaos into resolved, *audited* order, continuously, and never loses a leaf even when the systems above it crash.
 
 We call this category **Operational Entropy Management**, and it is not a metaphor: the framework literally measures `global_entropy()` and drives it toward zero, while the `SwarmInspector` charts the decay in real time.
 
@@ -75,7 +75,7 @@ Each horizon is a capability lifted straight from a living system.
 
 **The framework.** Agents here **never call each other**. They only read and mutate a shared semantic field — a **pluggable ground** that plays the role of the forest floor. It ships with SQLite (zero-config, in-process) and **PostgreSQL** — lock-free `SELECT … FOR UPDATE SKIP LOCKED` claims plus `LISTEN/NOTIFY` push — with Redis and DynamoDB on the roadmap. Swap the substrate in one line, `create_ground("postgresql://…")`, and the ants never notice.
 
-| Biology | StigmergicAI |
+| Biology | Stigmergic |
 | :--- | :--- |
 | The forest floor | `PheromoneGround` (the shared DB) |
 | Pheromone concentration | `Entropy` (`CHAOS=1.0 … ZERO=0.0`) |
@@ -95,7 +95,7 @@ Each horizon is a capability lifted straight from a living system.
 
 **The framework.** You would not trust a single microservice to silently mutate production state — so why trust a single LLM? Before any mutation is committed, it must survive a **Byzantine Quorum**. The `VerifierAnt` is your white blood cell; a prompt injection (`drop table`, `ignore previous instructions`) or an LLM hallucination is the antigen.
 
-| Biology | StigmergicAI |
+| Biology | Stigmergic |
 | :--- | :--- |
 | Antigen / pathogen | Prompt injection or hallucination |
 | White blood cell | `VerifierAnt` |
@@ -112,7 +112,7 @@ Each horizon is a capability lifted straight from a living system.
 
 **The framework.** Instead of compressing reasoning into a string, agents pass the **hidden activation tensor itself**. A Reader distills a heavy document into a last-layer hidden state `[1, seq_len, hidden_dim]`, parks that tensor in the pheromone's `latent_blob`, and *erases the text*. A downstream agent injects the tensor straight into its own residual stream — pure context, zero String Tax.
 
-| Biology | StigmergicAI |
+| Biology | Stigmergic |
 | :--- | :--- |
 | Electrochemical pulse | The serialized hidden-state tensor |
 | Synaptic transmission | `latent_blob` on the `LATENT_READY` trail |
@@ -178,7 +178,7 @@ Every caste reacts only to a scent (`Status`) and an entropy threshold. None of 
 
 ## 📦 Installation
 
-StigmergicAI keeps a **near-zero-dependency** core (just `pydantic`). The deep-learning horizons are strictly opt-in, so `import stigmergic_ai` never pays the torch/transformers import tax.
+Stigmergic keeps a **near-zero-dependency** core (just `pydantic`). The deep-learning horizons are strictly opt-in, so `import stigmergic` never pays the torch/transformers import tax.
 
 ```bash
 # Horizon 1 — the stigmergic core (pydantic only)
@@ -226,7 +226,7 @@ python -m pytest -q
 ## 🗂️ Project Structure
 
 ```text
-src/stigmergic_ai/
+src/stigmergic/
 ├── core/
 │   ├── environment.py     # 🐜 PheromoneGround, AbstractGround, EventSignal — the forest floor
 │   ├── backends/          # 🔌 pluggable grounds: create_ground() · PostgresGround (LISTEN/NOTIFY)
@@ -247,7 +247,7 @@ tests/      # torch-free suites: consensus · ground (+ reliability) · observab
 
 ## 📊 Standards & Benchmarks
 
-StigmergicAI targets a security-sensitive category, so it is designed to be *measured against recognized standards* rather than to rest on self-asserted claims.
+Stigmergic targets a security-sensitive category, so it is designed to be *measured against recognized standards* rather than to rest on self-asserted claims.
 
 **Threat model — mapped to the [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/).** The Byzantine quorum directly targets `LLM01: Prompt Injection` and `LLM09: Overreliance` (hallucination): no single model commits state, and every verdict carries a durable, replayable audit record (`ConsensusVerdict`). The full mapping — every OWASP risk to the control that answers it, plus the honest limitations — is in [`THREAT_MODEL.md`](THREAT_MODEL.md).
 
@@ -274,14 +274,14 @@ StigmergicAI targets a security-sensitive category, so it is designed to be *mea
 
 ## 🏗️ Why not LangChain / CrewAI?
 
-| Trait | Commercial Orchestrators | StigmergicAI | In nature |
+| Trait | Commercial Orchestrators | Stigmergic | In nature |
 | :--- | :--- | :--- | :--- |
 | **Topology** | Centralized supervisor/nodes | Decentralized stigmergy | An ant colony |
 | **Communication** | String-based RPC (lossy) | Tensor / latent injection | A neural synapse |
 | **Fault tolerance** | Try/catch retries | Semantic Byzantine quorum | An immune system |
 | **State persistence** | App memory (volatile) | Database physics (durable) | Pheromones in soil |
 
-Commercial frameworks model a **corporation**. StigmergicAI models an **organism**. Organisms are older, and they don't go down when the manager quits.
+Commercial frameworks model a **corporation**. Stigmergic models an **organism**. Organisms are older, and they don't go down when the manager quits.
 
 ## 📚 Documentation
 
@@ -294,6 +294,8 @@ Beyond this README, three documents specify the engineering contract in operatio
 
 ## 🤝 Contributing
 This is an experimental research project pushing the boundaries of Distributed Cognitive Systems. We welcome PRs for new Byzantine voting mechanisms, new `AbstractGround` backends (Redis, DynamoDB), Swarm Inspector visualizations, and Latent Transfer utilities. New organs for the organism are always welcome.
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev setup, the ground rules, and how to add a backend / juror / caste / baseline; [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) for community expectations; and [`CHANGELOG.md`](CHANGELOG.md) for the release history.
 
 ## 📄 License
 Apache License 2.0. See [`LICENSE`](LICENSE) for more information.

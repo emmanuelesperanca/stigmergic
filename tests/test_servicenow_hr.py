@@ -29,9 +29,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "demos" / "servicenow_hr"))
 
-from stigmergic_ai.agents.concrete import GovernanceAnt, redact_pii  # noqa: E402
-from stigmergic_ai.core.consensus import MockNLIJudge  # noqa: E402
-from stigmergic_ai.core.environment import (  # noqa: E402
+from stigmergic.agents.concrete import GovernanceAnt, redact_pii  # noqa: E402
+from stigmergic.core.consensus import MockNLIJudge  # noqa: E402
+from stigmergic.core.environment import (  # noqa: E402
     Entropy,
     Pheromone,
     PheromoneGround,

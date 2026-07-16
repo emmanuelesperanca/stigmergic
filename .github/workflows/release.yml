@@ -1,0 +1,62 @@
+name: release
+
+# Build the distributions and publish to PyPI when a version tag is pushed.
+#
+# One-time setup (by a maintainer):
+#   1. Create the project on PyPI and configure a "Trusted Publisher" for this
+#      repo + workflow (PyPI → project → Publishing). No API token is stored.
+#   2. Create a GitHub Environment named "pypi" (optionally with a protection
+#      rule requiring a manual approval before publish).
+#   3. Bump the version in pyproject.toml, update CHANGELOG.md, then:
+#         git tag v0.1.0 && git push origin v0.1.0
+#
+# Tip: point the publish step at TestPyPI first (see the commented `repository-url`)
+# to rehearse the release before going to the real index.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build distributions
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Check metadata
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write # OIDC — Trusted Publishing, no stored token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # To rehearse on TestPyPI first, uncomment:
+        # with:
+        #   repository-url: https://test.pypi.org/legacy/

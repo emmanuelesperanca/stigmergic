@@ -1,7 +1,7 @@
 """Pytest suite for the Semantic Raft Byzantine quorum and its mock juror.
 
 The whole suite is deliberately deep-learning-free: every juror is either a
-:class:`~stigmergic_ai.core.consensus.MockNLIJudge` (a deterministic keyword
+:class:`~stigmergic.core.consensus.MockNLIJudge` (a deterministic keyword
 heuristic) or a tiny *scripted* judge that returns a fixed vote sequence. So the
 tests run in milliseconds and -- crucially -- never import ``torch`` or
 ``transformers``. :func:`test_no_deep_learning_imports_leak` asserts that hygiene
@@ -32,8 +32,8 @@ import pytest
 # root without first installing the package.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from stigmergic_ai.agents.base_ant import Mutation  # noqa: E402
-from stigmergic_ai.core.consensus import (  # noqa: E402
+from stigmergic.agents.base_ant import Mutation  # noqa: E402
+from stigmergic.core.consensus import (  # noqa: E402
     CONTRADICTION,
     DEFAULT_RED_FLAGS,
     ENTAILMENT,
@@ -45,7 +45,7 @@ from stigmergic_ai.core.consensus import (  # noqa: E402
     SemanticRaft,
     TransformersNLIJudge,
 )
-from stigmergic_ai.core.environment import Entropy, Pheromone, Status  # noqa: E402
+from stigmergic.core.environment import Entropy, Pheromone, Status  # noqa: E402
 
 
 # -- helpers ------------------------------------------------------------------

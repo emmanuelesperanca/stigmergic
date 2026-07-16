@@ -1,7 +1,7 @@
 """Semantic Raft: a Byzantine quorum that gates every cognitive state mutation.
 
 You would not trust a single microservice to silently mutate production state;
-StigmergicAI extends the same suspicion to a single language model. Before a
+Stigmergic extends the same suspicion to a single language model. Before a
 proposed resolution is allowed to drive a pheromone's entropy to zero, it must
 survive a **Byzantine Cognitive Consensus** -- a small jury of independent
 Natural Language Inference (NLI) judges that each ask, in their own words,
@@ -10,9 +10,9 @@ hallucination / injection?"
 
 The flow:
 
-* A Solver proposes a :class:`~stigmergic_ai.agents.base_ant.Mutation` and parks
+* A Solver proposes a :class:`~stigmergic.agents.base_ant.Mutation` and parks
   the pheromone on the ``PENDING_CONSENSUS`` trail (it is *not* committed).
-* A :class:`~stigmergic_ai.agents.verifier_ant.VerifierAnt` smells that trail and
+* A :class:`~stigmergic.agents.verifier_ant.VerifierAnt` smells that trail and
   runs :meth:`SemanticRaft.evaluate`.
 * Each juror node classifies ``(premise, hypothesis)`` as ``ENTAILMENT``,
   ``CONTRADICTION`` or ``NEUTRAL``. Approval requires ``ENTAILMENT``.
@@ -22,7 +22,7 @@ The flow:
 Design notes:
 
 * This module is import-light: ``transformers``/``torch`` are imported lazily,
-  only when a real model is first loaded. Importing :mod:`stigmergic_ai` -- or
+  only when a real model is first loaded. Importing :mod:`stigmergic` -- or
   even this module -- never pulls the deep-learning stack. Install it with
   ``pip install -e ".[cognition]"``.
 * The heavy NLI pipeline is loaded **once** per model name into a module-level,
@@ -42,8 +42,8 @@ from typing import Any, Callable, Protocol, runtime_checkable
 
 from pydantic import BaseModel
 
-from stigmergic_ai.agents.base_ant import Mutation
-from stigmergic_ai.core.environment import Entropy, Pheromone, Status
+from stigmergic.agents.base_ant import Mutation
+from stigmergic.core.environment import Entropy, Pheromone, Status
 
 __all__ = [
     "ENTAILMENT",
@@ -61,7 +61,7 @@ __all__ = [
     "SemanticRaft",
 ]
 
-logger = logging.getLogger("stigmergic_ai.consensus")
+logger = logging.getLogger("stigmergic.consensus")
 
 # -- canonical NLI labels -----------------------------------------------------
 
@@ -345,7 +345,7 @@ def _default_llm_parser(text: str) -> tuple[str, float]:
 class LLMJudge:
     """A provider-agnostic juror backed by any text-completion callable.
 
-    StigmergicAI deliberately refuses to marry a vendor SDK. You supply a
+    Stigmergic deliberately refuses to marry a vendor SDK. You supply a
     ``complete(prompt) -> str`` function -- wrapping OpenAI, Anthropic, a local
     ``llama.cpp`` server, anything -- and this judge turns it into a quorum
     member: it frames the ``(premise, hypothesis)`` pair into a prompt, calls

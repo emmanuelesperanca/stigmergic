@@ -4,7 +4,7 @@ A stigmergic system has no orchestrator and therefore no call graph to trace --
 coordination lives entirely in the shared field. That is a feature (no single
 point of failure) and an observability problem (no obvious place to watch). The
 :class:`SwarmInspector` solves it by subscribing to the ground's event bus and
-turning the raw :class:`~stigmergic_ai.core.environment.GroundEvent` stream into
+turning the raw :class:`~stigmergic.core.environment.GroundEvent` stream into
 the three things an operator actually wants:
 
 * **Lifecycle** -- replay the full life of any single pheromone, from ``RAW``
@@ -17,7 +17,7 @@ the three things an operator actually wants:
 It is a passive observer: listener exceptions are swallowed by the bus, so the
 inspector can never slow down or crash the colony. It is also dependency-free
 (stdlib only) and works identically over any
-:class:`~stigmergic_ai.core.environment.AbstractGround` backend -- SQLite today,
+:class:`~stigmergic.core.environment.AbstractGround` backend -- SQLite today,
 Postgres tomorrow.
 """
 
@@ -28,7 +28,7 @@ import time
 from collections import Counter, defaultdict, deque
 from typing import IO, Callable
 
-from stigmergic_ai.core.environment import (
+from stigmergic.core.environment import (
     AbstractGround,
     GroundEvent,
     Status,

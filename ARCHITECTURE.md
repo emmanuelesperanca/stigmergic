@@ -8,7 +8,7 @@
 
 ## 1. Thesis
 
-StigmergicAI is a runtime for **agentic workflows coordinated through durable
+Stigmergic is a runtime for **agentic workflows coordinated through durable
 shared state** rather than through direct calls between agents. There is no
 supervisor holding the graph in memory; the state store *is* the contract.
 
@@ -38,17 +38,17 @@ The single load-bearing rule:
 
 | Component | File | Role |
 | :--- | :--- | :--- |
-| `AbstractGround` | [src/stigmergic_ai/core/environment.py](src/stigmergic_ai/core/environment.py) | The storage-agnostic contract every ground implements |
-| `PheromoneGround` | [environment.py](src/stigmergic_ai/core/environment.py) | SQLite ground (default, in-process, WAL) |
-| `PostgresGround` | [src/stigmergic_ai/core/backends/postgres.py](src/stigmergic_ai/core/backends/postgres.py) | Production ground (`SKIP LOCKED` claims, `LISTEN/NOTIFY`) |
-| `create_ground(dsn)` | [src/stigmergic_ai/core/backends/__init__.py](src/stigmergic_ai/core/backends/__init__.py) | Factory that routes a DSN to a backend |
-| `Pheromone` | [environment.py](src/stigmergic_ai/core/environment.py) | One unit of work (one row): payload, status, entropy, reliability fields |
-| `EventSignal` / `GroundEvent` | [environment.py](src/stigmergic_ai/core/environment.py) | The event bus every mutation emits on |
-| `BaseAnt` / `ConsumerAnt` / `ProducerAnt` | [src/stigmergic_ai/agents/base_ant.py](src/stigmergic_ai/agents/base_ant.py) | The worker heartbeat + claim→metabolize→commit loop |
-| `SemanticRaft` + judges | [src/stigmergic_ai/core/consensus.py](src/stigmergic_ai/core/consensus.py) | The heterogeneous consensus quorum |
-| `VerifierAnt` | [src/stigmergic_ai/agents/verifier_ant.py](src/stigmergic_ai/agents/verifier_ant.py) | The caste that runs the quorum before a writeback |
-| `SwarmInspector` | [src/stigmergic_ai/core/observability.py](src/stigmergic_ai/core/observability.py) | The flight recorder (lifecycle, entropy, replay) |
-| `latent_transfer` | [src/stigmergic_ai/core/latent_transfer.py](src/stigmergic_ai/core/latent_transfer.py) | Tensor (de)serialization for Horizon 3 |
+| `AbstractGround` | [src/stigmergic/core/environment.py](src/stigmergic/core/environment.py) | The storage-agnostic contract every ground implements |
+| `PheromoneGround` | [environment.py](src/stigmergic/core/environment.py) | SQLite ground (default, in-process, WAL) |
+| `PostgresGround` | [src/stigmergic/core/backends/postgres.py](src/stigmergic/core/backends/postgres.py) | Production ground (`SKIP LOCKED` claims, `LISTEN/NOTIFY`) |
+| `create_ground(dsn)` | [src/stigmergic/core/backends/__init__.py](src/stigmergic/core/backends/__init__.py) | Factory that routes a DSN to a backend |
+| `Pheromone` | [environment.py](src/stigmergic/core/environment.py) | One unit of work (one row): payload, status, entropy, reliability fields |
+| `EventSignal` / `GroundEvent` | [environment.py](src/stigmergic/core/environment.py) | The event bus every mutation emits on |
+| `BaseAnt` / `ConsumerAnt` / `ProducerAnt` | [src/stigmergic/agents/base_ant.py](src/stigmergic/agents/base_ant.py) | The worker heartbeat + claim→metabolize→commit loop |
+| `SemanticRaft` + judges | [src/stigmergic/core/consensus.py](src/stigmergic/core/consensus.py) | The heterogeneous consensus quorum |
+| `VerifierAnt` | [src/stigmergic/agents/verifier_ant.py](src/stigmergic/agents/verifier_ant.py) | The caste that runs the quorum before a writeback |
+| `SwarmInspector` | [src/stigmergic/core/observability.py](src/stigmergic/core/observability.py) | The flight recorder (lifecycle, entropy, replay) |
+| `latent_transfer` | [src/stigmergic/core/latent_transfer.py](src/stigmergic/core/latent_transfer.py) | Tensor (de)serialization for Horizon 3 |
 
 The ServiceNow HR demo ([demos/servicenow_hr/](demos/servicenow_hr/)) is the
 end-to-end reference application; the injection benchmark
@@ -72,7 +72,7 @@ Swapping a substrate never touches an ant.
 | **System of record** | `ServiceNowClient` protocol | `MockServiceNowClient` (demo); a real REST client drops in later |
 | **Human decision** | `ExpertOracle` callable | `ScriptedExpertOracle`, `approve_all_oracle` |
 
-The core stays **torch-free and driver-free at import**: `import stigmergic_ai`
+The core stays **torch-free and driver-free at import**: `import stigmergic`
 never pulls torch, transformers, or psycopg. Heavy paths are lazy and gated
 behind extras (`[cognition]`, `[postgres]`).
 

@@ -1,6 +1,6 @@
 """The Ant: an autonomous worker that lives or dies by the Pheromone Ground.
 
-An ant in StigmergicAI is not an object other code calls. It is a *process* --
+An ant in Stigmergic is not an object other code calls. It is a *process* --
 a background thread with a heartbeat. It wakes, smells the shared field, reacts
 to entropy, mutates the field, and goes back to sleep. It has no inbox, no
 caller, and no knowledge of any sibling ant. The only thing connecting one ant
@@ -33,7 +33,7 @@ import threading
 
 from pydantic import BaseModel, Field
 
-from stigmergic_ai.core.environment import (
+from stigmergic.core.environment import (
     Entropy,
     Pheromone,
     PheromoneGround,
@@ -42,7 +42,7 @@ from stigmergic_ai.core.environment import (
 
 __all__ = ["Mutation", "BaseAnt", "ConsumerAnt", "ProducerAnt"]
 
-logger = logging.getLogger("stigmergic_ai.agents")
+logger = logging.getLogger("stigmergic.agents")
 
 
 class Mutation(BaseModel):

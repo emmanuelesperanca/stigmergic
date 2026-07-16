@@ -34,9 +34,9 @@ from dataclasses import dataclass
 # Make the src-layout package importable when running this file directly.
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation  # noqa: E402
-from stigmergic_ai.agents.hybrid_ant import HybridSolverAnt  # noqa: E402
-from stigmergic_ai.core.environment import (  # noqa: E402
+from stigmergic.agents.base_ant import ConsumerAnt, Mutation  # noqa: E402
+from stigmergic.agents.hybrid_ant import HybridSolverAnt  # noqa: E402
+from stigmergic.core.environment import (  # noqa: E402
     Entropy,
     Pheromone,
     PheromoneGround,
@@ -209,7 +209,7 @@ def main() -> None:
     decider = DeciderAnt(ground)
 
     print("=" * 74)
-    print("  StigmergicAI -- Latent Telepathy (Latent State Transfer)")
+    print("  Stigmergic -- Latent Telepathy (Latent State Transfer)")
     print("  Reader (HybridSolverAnt, engine=local)  ->  Decider")
     print("=" * 74)
 

@@ -1,4 +1,4 @@
-"""Harness for the StigmergicAI injection-capture benchmark.
+"""Harness for the Stigmergic injection-capture benchmark.
 
 This module turns the framework's Byzantine quorum into a *measurable* anti-prompt-
 injection control and scores it the way a security benchmark should: as a binary
@@ -10,7 +10,7 @@ The central abstraction is :class:`Defense` -- anything that, given one
 
 * :class:`KeywordGuardrail` -- a naive substring filter (the baseline a lot of
   "guardrail" tooling reduces to);
-* :class:`RaftDefense` -- the real :class:`~stigmergic_ai.core.consensus.SemanticRaft`
+* :class:`RaftDefense` -- the real :class:`~stigmergic.core.consensus.SemanticRaft`
   quorum, configured as a single judge, a homogeneous quorum, or a heterogeneous
   panel.
 
@@ -40,8 +40,8 @@ _SRC = pathlib.Path(__file__).resolve().parent.parent.parent / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from stigmergic_ai.agents.base_ant import Mutation  # noqa: E402
-from stigmergic_ai.core.consensus import (  # noqa: E402
+from stigmergic.agents.base_ant import Mutation  # noqa: E402
+from stigmergic.core.consensus import (  # noqa: E402
     CONTRADICTION,
     DEFAULT_RED_FLAGS,
     ENTAILMENT,
@@ -51,7 +51,7 @@ from stigmergic_ai.core.consensus import (  # noqa: E402
     RuleBasedJudge,
     SemanticRaft,
 )
-from stigmergic_ai.core.environment import Entropy, Pheromone, Status  # noqa: E402
+from stigmergic.core.environment import Entropy, Pheromone, Status  # noqa: E402
 
 __all__ = [
     "ATTACK",
@@ -603,7 +603,7 @@ def _semantic_judge(use_nli: bool, nli_model: str | None = None) -> NLIJudge:
     SentencePiece, or a stronger MNLI checkpoint.
     """
     if use_nli:
-        from stigmergic_ai.core.consensus import (
+        from stigmergic.core.consensus import (
             DEFAULT_NLI_MODEL,
             TransformersNLIJudge,
         )

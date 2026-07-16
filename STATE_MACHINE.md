@@ -2,7 +2,7 @@
 
 > The formal lifecycle of a unit of work (a `Pheromone`). This is not a
 > narrative — it is the exact set of legal states and transitions defined in
-> [src/stigmergic_ai/core/environment.py](src/stigmergic_ai/core/environment.py)
+> [src/stigmergic/core/environment.py](src/stigmergic/core/environment.py)
 > (`Status`, `TERMINAL_STATUSES`, `STATE_TRANSITIONS`) and, when a ground is
 > created with `enforce_transitions=True`, enforced at every `update_state`.
 

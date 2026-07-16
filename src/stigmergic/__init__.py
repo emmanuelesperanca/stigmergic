@@ -1,6 +1,6 @@
-"""StigmergicAI: a near-zero-dependency, fault-tolerant multi-agent framework.
+"""Stigmergic: a near-zero-dependency, fault-tolerant multi-agent framework.
 
-StigmergicAI models a multi-agent system as a physical ecosystem rather than an
+Stigmergic models a multi-agent system as a physical ecosystem rather than an
 org chart. Agents ("ants") never call one another; they coordinate solely by
 reading and mutating a shared semantic field -- the :class:`PheromoneGround`.
 Work is represented as entropy in that field, and the swarm drives it to zero.
@@ -9,18 +9,18 @@ This top-level package eagerly exposes only the lightweight Horizon 1 primitives
 (the environment and the base ant castes) plus the storage-agnostic plumbing --
 the pluggable-backend factory and the Swarm Inspector. The deep-learning horizons
 -- Byzantine Cognitive Consensus and Latent State Transfer -- live in submodules
-that are imported on demand, so ``import stigmergic_ai`` never pays the torch
+that are imported on demand, so ``import stigmergic`` never pays the torch
 import tax (and never imports a database driver either).
 """
 
-from stigmergic_ai.agents.base_ant import (
+from stigmergic.agents.base_ant import (
     BaseAnt,
     ConsumerAnt,
     Mutation,
     ProducerAnt,
 )
-from stigmergic_ai.core.backends import create_ground
-from stigmergic_ai.core.environment import (
+from stigmergic.core.backends import create_ground
+from stigmergic.core.environment import (
     AbstractGround,
     Entropy,
     EventSignal,
@@ -29,7 +29,7 @@ from stigmergic_ai.core.environment import (
     PheromoneGround,
     Status,
 )
-from stigmergic_ai.core.observability import SwarmInspector
+from stigmergic.core.observability import SwarmInspector
 
 __version__ = "0.1.0"
 

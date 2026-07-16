@@ -3,13 +3,13 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stigmergic-ai"
+name = "stigmergic"
 version = "0.1.0"
 description = "A near-zero-dependency, fault-tolerant multi-agent framework built on Stigmergy, Latent State Transfer, and a Byzantine-inspired consensus quorum."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-authors = [{ name = "StigmergicAI Contributors" }]
+authors = [{ name = "Stigmergic Contributors" }]
 keywords = [
     "multi-agent",
     "stigmergy",
@@ -32,7 +32,7 @@ classifiers = [
 
 # Horizon 1 (Stigmergic Swarms) relies only on the standard library plus
 # pydantic. The heavy cognitive horizons are opt-in via extras so that
-# `import stigmergic_ai` never pays the torch/transformers import tax.
+# `import stigmergic` never pays the torch/transformers import tax.
 dependencies = [
     "pydantic>=2.0",
 ]
@@ -76,8 +76,11 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/stigmergic-ai/stigmergic-ai"
-Repository = "https://github.com/stigmergic-ai/stigmergic-ai"
+Homepage = "https://github.com/emmanuelesperanca/stigmergic"
+Repository = "https://github.com/emmanuelesperanca/stigmergic"
+Documentation = "https://github.com/emmanuelesperanca/stigmergic/blob/main/ARCHITECTURE.md"
+Issues = "https://github.com/emmanuelesperanca/stigmergic/issues"
+Changelog = "https://github.com/emmanuelesperanca/stigmergic/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
