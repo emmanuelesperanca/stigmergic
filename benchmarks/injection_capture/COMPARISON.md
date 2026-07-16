@@ -1,6 +1,6 @@
 # Benchmark Comparison - All Modes
 
-> Regenerated on 2026-06-28 22:29 UTC from `results/*.json`. Each row is one config
+> Regenerated on 2026-07-16 14:04 UTC from `results/*.json`. Each row is one config
 > from one run mode; re-run any mode to refresh its rows.
 
 | Mode | Config | Capture rate | FPR | Precision | F1 | Accuracy |

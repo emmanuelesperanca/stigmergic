@@ -146,7 +146,7 @@ def test_context_manager_detaches_on_exit(ground: PheromoneGround) -> None:
 
 def test_callable_sink_receives_events(ground: PheromoneGround) -> None:
     captured: list = []
-    insp = SwarmInspector(sink=captured.append).attach(ground)
+    SwarmInspector(sink=captured.append).attach(ground)
     ground.inject_chaos("routed")
     assert len(captured) == 1
     assert captured[0].event_type == "INJECT"

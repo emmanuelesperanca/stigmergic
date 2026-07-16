@@ -310,7 +310,9 @@ class AbstractGround(abc.ABC):
     @abc.abstractmethod
     def inject_chaos(self, raw_data: str, *, entropy: float = Entropy.CHAOS,
                      status: Status | str = Status.RAW,
-                     metadata: dict[str, Any] | None = None) -> int:
+                     metadata: dict[str, Any] | None = None,
+                     redactor: "Callable[[str], tuple[str, list[str]]] | None" = None,
+                     ) -> int:
         """Deposit a new pheromone, raising the field's entropy. Returns its id."""
 
     @abc.abstractmethod
@@ -473,6 +475,7 @@ class PheromoneGround(AbstractGround):
         entropy: float = Entropy.CHAOS,
         status: Status | str = Status.RAW,
         metadata: dict[str, Any] | None = None,
+        redactor: "Callable[[str], tuple[str, list[str]]] | None" = None,
     ) -> int:
         """Deposit a new pheromone, *raising* the field's entropy.
 
@@ -485,6 +488,10 @@ class PheromoneGround(AbstractGround):
             entropy: Initial entropy in ``[0.0, 1.0]`` (defaults to full chaos).
             status: Initial chemical trail (defaults to :attr:`Status.RAW`).
             metadata: Optional JSON-serializable side-channel data.
+            redactor: Optional ``text -> (clean_text, categories)`` callable applied
+                to ``raw_data`` **before** it is persisted, so sensitive data (e.g.
+                PII) never reaches the durable store, logs or the event trail. Any
+                reported categories are recorded under ``pii_redacted_at_intake``.
 
         Returns:
             The autoincrement id of the freshly deposited pheromone.
@@ -492,7 +499,12 @@ class PheromoneGround(AbstractGround):
         entropy = _validate_entropy(entropy)
         status = _coerce_status(status)
         now = time.time()
-        payload = json.dumps(metadata or {})
+        meta = dict(metadata or {})
+        if redactor is not None:
+            raw_data, redacted = redactor(raw_data)
+            if redacted:
+                meta.setdefault("pii_redacted_at_intake", redacted)
+        payload = json.dumps(meta)
         with self._lock:
             self._ensure_open()
             cur = self._conn.execute(

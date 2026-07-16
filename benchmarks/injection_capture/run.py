@@ -125,9 +125,14 @@ def _resolve_llm_complete(args: argparse.Namespace):
 
 
 def _format_console_table(metrics: list[Metrics]) -> str:
-    header = f"{'config':<22}{'capture':>9}{'FPR':>8}{'prec':>8}{'F1':>8}{'acc':>8}"
+    header = (
+        f"{'config':<22}{'capture':>9}{'FPR':>8}{'prec':>8}"
+        f"{'F1':>8}{'acc':>8}{'p50ms':>9}"
+    )
     lines = [header, "-" * len(header)]
     for m in metrics:
+        summary = m.latency_summary()
+        p50 = summary.get("p50_ms", 0.0) if summary else 0.0
         lines.append(
             f"{m.config:<22}"
             f"{m.capture_rate:>9.3f}"
@@ -135,6 +140,7 @@ def _format_console_table(metrics: list[Metrics]) -> str:
             f"{m.precision:>8.3f}"
             f"{m.f1:>8.3f}"
             f"{m.accuracy:>8.3f}"
+            f"{p50:>9.3f}"
         )
     return "\n".join(lines)
 
@@ -166,8 +172,93 @@ def _md_category_table(metrics: list[Metrics]) -> str:
     return "\n".join(rows)
 
 
+def _md_ci_table(metrics: list[Metrics]) -> str:
+    """Capture/FPR with their 95% Wilson confidence intervals."""
+    rows = [
+        "| Config | Capture rate (95% CI) | False-positive rate (95% CI) |",
+        "| :--- | ---: | ---: |",
+    ]
+    for m in metrics:
+        clo, chi = m.capture_interval()
+        flo, fhi = m.false_positive_interval()
+        rows.append(
+            f"| `{m.config}` | {m.capture_rate:.1%} [{clo:.1%}, {chi:.1%}] "
+            f"| {m.false_positive_rate:.1%} [{flo:.1%}, {fhi:.1%}] |"
+        )
+    return "\n".join(rows)
+
+
+def _md_category_fpr_table(metrics: list[Metrics]) -> str:
+    """Per-benign-category false-positive rate (isolates look-alike over-blocking)."""
+    cats = sorted({c for m in metrics for c in m.per_category_benign_total})
+    if not cats:
+        return ""
+    head = "| Benign category | " + " | ".join(f"`{m.config}`" for m in metrics) + " |"
+    sep = "| :--- | " + " | ".join("---:" for _ in metrics) + " |"
+    rows = [head, sep]
+    for cat in cats:
+        cells = []
+        for m in metrics:
+            fpr = m.category_false_positive().get(cat)
+            cells.append(f"{fpr:.0%}" if fpr is not None else "-")
+        rows.append(f"| {cat} | " + " | ".join(cells) + " |")
+    return "\n".join(rows)
+
+
+def _md_latency_table(metrics: list[Metrics]) -> str:
+    """Per-config p50/p95/mean latency (machine-dependent; not committed to JSON)."""
+    rows = [
+        "| Config | p50 (ms) | p95 (ms) | mean (ms) |",
+        "| :--- | ---: | ---: | ---: |",
+    ]
+    for m in metrics:
+        summary = m.latency_summary()
+        if not summary:
+            rows.append(f"| `{m.config}` | - | - | - |")
+        else:
+            rows.append(
+                f"| `{m.config}` | {summary['p50_ms']:.3f} "
+                f"| {summary['p95_ms']:.3f} | {summary['mean_ms']:.3f} |"
+            )
+    return "\n".join(rows)
+
+
+def _md_pr_curve(per_item_records: dict[str, list[dict]]) -> str:
+    """Precision-recall sweep for the flagship config that emits juror votes."""
+    from harness import pr_curve
+
+    name = next(
+        (
+            pref
+            for pref in ("heterogeneous-panel", "quorum-3", "single-judge")
+            if pref in per_item_records
+        ),
+        None,
+    )
+    if name is None:
+        return ""
+    points = pr_curve(per_item_records[name])
+    rows = [
+        f"Sweeping the approval-ratio threshold (approvals / total votes) for "
+        f"`{name}`; a proposal is predicted blocked at or below the threshold.",
+        "",
+        "| Threshold | Precision | Recall |",
+        "| ---: | ---: | ---: |",
+    ]
+    for p in points:
+        rows.append(
+            f"| {p['threshold']:.2f} | {p['precision']:.1%} | {p['recall']:.1%} |"
+        )
+    return "\n".join(rows)
+
+
 def _build_markdown(
-    metrics: list[Metrics], *, n_items: int, n_attacks: int, mode: str
+    metrics: list[Metrics],
+    *,
+    n_items: int,
+    n_attacks: int,
+    mode: str,
+    per_item_records: dict[str, list[dict]] | None = None,
 ) -> str:
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     keyword = next((m for m in metrics if m.config == "keyword-only"), None)
@@ -204,6 +295,30 @@ class is "attack"; a *capture* is an attack the quorum **slashes**.
 ## Capture rate by attack category
 
 {_md_category_table(metrics)}
+
+## False-positive rate by benign category
+
+{_md_category_fpr_table(metrics)}
+
+## Confidence intervals (95%, Wilson)
+
+The capture and false-positive rates are proportions over a finite corpus, so
+each carries sampling uncertainty. The Wilson score interval below is the
+honest error bar to quote alongside a headline number.
+
+{_md_ci_table(metrics)}
+
+## Precision-recall trade-off
+
+{_md_pr_curve(per_item_records or {})}
+
+## Latency (machine-dependent, informational)
+
+> Wall-clock per-item latency on the machine that generated this report. Unlike
+> the capture/FPR headline, these numbers are **not** reproducible across
+> hardware and are deliberately excluded from `results.json`.
+
+{_md_latency_table(metrics)}
 
 ## How this was produced
 
@@ -504,6 +619,7 @@ def main(argv: list[str] | None = None) -> int:
     mode = _mode_label(args)
     slug = _mode_slug(args)
 
+    llm_complete = None
     if args.byzantine:
         defenses = build_byzantine_defenses()
     else:
@@ -526,6 +642,29 @@ def main(argv: list[str] | None = None) -> int:
         "per_item": per_item_records,
     }
 
+    # When a real LLM juror ran, attach token usage and an estimated USD cost.
+    # This lives only in the model-dependent snapshot, never in the committed
+    # torch-free headline.
+    if llm_complete is not None and getattr(llm_complete, "usage", None):
+        from harness import estimate_cost
+
+        used = llm_complete.usage
+        payload["llm_cost"] = {
+            "model": used.get("model", ""),
+            "prompt_tokens": used["prompt_tokens"],
+            "completion_tokens": used["completion_tokens"],
+            "api_calls": used["api_calls"],
+            "cache_hits": used["cache_hits"],
+            "estimated_usd": round(
+                estimate_cost(
+                    used["prompt_tokens"],
+                    used["completion_tokens"],
+                    used.get("model", ""),
+                ),
+                6,
+            ),
+        }
+
     # Always archive this run's snapshot (committed evidence) and refresh the
     # cross-mode comparison ledger.
     archived = _archive_payload(payload, slug)
@@ -547,7 +686,11 @@ def main(argv: list[str] | None = None) -> int:
         RESULTS_JSON.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         RESULTS_MD.write_text(
             _build_markdown(
-                all_metrics, n_items=n_items, n_attacks=n_attacks, mode=mode
+                all_metrics,
+                n_items=n_items,
+                n_attacks=n_attacks,
+                mode=mode,
+                per_item_records=per_item_records,
             ),
             encoding="utf-8",
         )
@@ -562,6 +705,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"corpus: {n_items} items ({n_attacks} attacks, "
               f"{n_items - n_attacks} benign)\n")
         print(_format_console_table(all_metrics))
+        cost = payload.get("llm_cost")
+        if cost:
+            print(
+                f"\nLLM usage: {cost['api_calls']} calls "
+                f"({cost['cache_hits']} cached), "
+                f"{cost['prompt_tokens']}+{cost['completion_tokens']} tokens, "
+                f"~${cost['estimated_usd']:.4f} ({cost['model']})"
+            )
         if primary_md is archived:
             print(
                 f"\nArchived results/{archived.name} and refreshed "
@@ -573,7 +724,6 @@ def main(argv: list[str] | None = None) -> int:
                 f"{COMPARISON_MD.name} to {HERE}"
             )
     return 0
-
 
 
 if __name__ == "__main__":

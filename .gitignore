@@ -233,3 +233,6 @@ swarm.db
 # Benchmark LLM response cache: opt-in `--llm` runs memoize each provider reply
 # on disk for reproducibility and cost. It is machine-local, not source.
 benchmarks/**/.cache/
+
+# Draft of the Medium blog post -- unpublished writing, not shipped with the code.
+medium_post

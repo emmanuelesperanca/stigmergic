@@ -22,6 +22,7 @@ Covered:
 from __future__ import annotations
 
 import importlib.util
+import os
 import pathlib
 import sys
 import threading
@@ -41,6 +42,12 @@ from stigmergic_ai.core.environment import (  # noqa: E402
 )
 
 _HAS_PSYCOPG = importlib.util.find_spec("psycopg") is not None
+
+#: A live PostgreSQL DSN (e.g. ``postgresql://user:pw@localhost/db``). When set --
+#: which is the case in the dedicated CI ``postgres`` job -- the conformance suite
+#: at the bottom of this module runs against a real server. Unset locally, so the
+#: default (torch-free, driverless) run simply skips those tests.
+_PG_DSN = os.environ.get("STIG_TEST_PG_DSN")
 
 
 @pytest.fixture()
@@ -232,3 +239,121 @@ def test_postgres_accepts_safe_identifiers(ok: str) -> None:
     from stigmergic_ai.core.backends.postgres import _safe_ident
 
     assert _safe_ident(ok, kind="table") == ok
+
+
+# -- PostgresGround (live server) ---------------------------------------------
+#
+# These only run when STIG_TEST_PG_DSN points at a real PostgreSQL (the CI
+# `postgres` job wires up a `services: postgres` container). They are the first
+# and only place PostgresGround touches an actual database, so they exercise the
+# whole AbstractGround contract end to end: CRUD, the lock-free SKIP LOCKED
+# claim, global entropy accounting, and the LISTEN/NOTIFY wakeup path.
+
+requires_pg = pytest.mark.skipif(
+    not (_HAS_PSYCOPG and _PG_DSN),
+    reason="set STIG_TEST_PG_DSN (and install psycopg) to run live PostgresGround tests",
+)
+
+
+@pytest.fixture()
+def pg_ground():
+    from stigmergic_ai.core.backends.postgres import PostgresGround
+
+    g = PostgresGround(
+        _PG_DSN,
+        table="pheromones_pytest",
+        channel="pheromone_events_pytest",
+    )
+    g.reset()  # start from a clean, id-reset field even if a prior run left rows
+    try:
+        yield g
+    finally:
+        try:
+            g.reset()
+        except Exception:  # noqa: BLE001 -- teardown is best-effort
+            pass
+        g.close()
+
+
+@requires_pg
+def test_pg_inject_and_get_roundtrip(pg_ground) -> None:
+    tid = pg_ground.inject_chaos("summarize the Q3 report", metadata={"k": "v"})
+    assert tid > 0
+    ph = pg_ground.get(tid)
+    assert ph is not None
+    assert ph.raw_data == "summarize the Q3 report"
+    assert ph.status is Status.RAW
+    assert ph.entropy == pytest.approx(Entropy.CHAOS)
+    assert ph.metadata == {"k": "v"}
+    assert pg_ground.count() == 1
+
+
+@requires_pg
+def test_pg_claim_is_ordered_and_exhausts(pg_ground) -> None:
+    # Higher entropy is more urgent, so it must be handed out first.
+    a = pg_ground.inject_chaos("alpha", entropy=Entropy.CHAOS)
+    b = pg_ground.inject_chaos("beta", entropy=Entropy.HIGH)
+
+    first = pg_ground.claim("w1", status=Status.RAW)
+    assert first is not None and first.id == a
+    assert first.status is Status.CLAIMED and first.owner == "w1"
+
+    second = pg_ground.claim("w2", status=Status.RAW)
+    assert second is not None and second.id == b
+
+    # Nothing RAW is left to grab -> the lock-free claim yields None.
+    assert pg_ground.claim("w3", status=Status.RAW) is None
+
+
+@requires_pg
+def test_pg_update_state_drives_entropy_to_zero(pg_ground) -> None:
+    tid = pg_ground.inject_chaos("resolve me", entropy=Entropy.CHAOS)
+    assert pg_ground.global_entropy() > 0.0
+
+    changed = pg_ground.update_state(
+        tid, status=Status.RESOLVED, entropy=Entropy.MIN, clear_owner=True
+    )
+    assert changed is True
+
+    ph = pg_ground.get(tid)
+    assert ph is not None and ph.status is Status.RESOLVED and ph.owner is None
+    assert pg_ground.global_entropy() == pytest.approx(0.0)
+    # A terminal pheromone is excluded from the claimable set.
+    assert pg_ground.claim("w") is None
+
+
+@requires_pg
+def test_pg_sense_reads_without_mutating(pg_ground) -> None:
+    pg_ground.inject_chaos("observe only", entropy=Entropy.CHAOS)
+    first = pg_ground.sense(limit=5)
+    assert len(first) == 1 and first[0].status is Status.RAW
+    # Sensing again returns the same untouched row (no claim happened).
+    assert pg_ground.sense()[0].status is Status.RAW
+    assert pg_ground.count(Status.RAW) == 1
+
+
+@requires_pg
+def test_pg_reset_wipes_the_field(pg_ground) -> None:
+    pg_ground.inject_chaos("gone soon")
+    assert pg_ground.count() >= 1
+    pg_ground.reset()
+    assert pg_ground.count() == 0
+    assert pg_ground.global_entropy() == pytest.approx(0.0)
+
+
+@requires_pg
+def test_pg_notify_wakes_wait_for_change(pg_ground) -> None:
+    # The real payoff of Postgres: a mutation fires a server NOTIFY that the
+    # background listener rebroadcasts onto the local bus, waking any waiter.
+    result: dict[str, object] = {}
+
+    def waiter() -> None:
+        result["woke"] = pg_ground.wait_for_change(3.0)
+
+    thread = threading.Thread(target=waiter)
+    thread.start()
+    time.sleep(0.3)  # let the waiter enter the wait and the listener settle
+    pg_ground.inject_chaos("wake the colony")
+    thread.join(timeout=4.0)
+
+    assert result.get("woke") is True

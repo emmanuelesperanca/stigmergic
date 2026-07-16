@@ -1,0 +1,23 @@
+[flake8]
+# The project intentionally uses a generous line length: the code favours
+# descriptive, self-documenting statements and richly worded docstrings over
+# hard wrapping. This mirrors the editor configuration and keeps the lint gate
+# in CI consistent with local development.
+max-line-length = 300
+
+# E203 (whitespace before ':') and W503 (line break before binary operator)
+# fight PEP 8's own recommendations and Black/most formatters -- disable them.
+extend-ignore = E203, W503
+
+exclude =
+    .git,
+    __pycache__,
+    build,
+    dist,
+    .venv,
+    venv,
+    .eggs,
+    *.egg-info,
+    .pytest_cache,
+    .ruff_cache,
+    .mypy_cache

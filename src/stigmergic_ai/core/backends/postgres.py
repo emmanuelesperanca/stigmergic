@@ -24,7 +24,7 @@ import logging
 import re
 import threading
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from stigmergic_ai.core.environment import (
     AbstractGround,
@@ -161,14 +161,25 @@ class PostgresGround(AbstractGround):
         entropy: float = Entropy.CHAOS,
         status: Status | str = Status.RAW,
         metadata: dict[str, Any] | None = None,
+        redactor: "Callable[[str], tuple[str, list[str]]] | None" = None,
     ) -> int:
-        """Deposit a new pheromone and return its server-assigned id."""
+        """Deposit a new pheromone and return its server-assigned id.
+
+        ``redactor`` (``text -> (clean_text, categories)``) is applied to
+        ``raw_data`` before it is written, so sensitive data never reaches the
+        durable store; any categories are recorded under ``pii_redacted_at_intake``.
+        """
         from psycopg.types.json import Jsonb
 
         self._ensure_open()
         entropy = _validate_entropy(entropy)
         status = _coerce_status(status)
         now = time.time()
+        meta = dict(metadata or {})
+        if redactor is not None:
+            raw_data, redacted = redactor(raw_data)
+            if redacted:
+                meta.setdefault("pii_redacted_at_intake", redacted)
         row = self._conn.execute(
             f"""
             INSERT INTO {self.table}
@@ -176,7 +187,7 @@ class PostgresGround(AbstractGround):
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
             """,
-            (raw_data, None, entropy, status.value, None, now, now, Jsonb(metadata or {})),
+            (raw_data, None, entropy, status.value, None, now, now, Jsonb(meta)),
         ).fetchone()
         task_id = int(row["id"])
         self._notify("INJECT", task_id)
@@ -201,7 +212,7 @@ class PostgresGround(AbstractGround):
         new_status = _coerce_status(new_status)
         terminal = [s.value for s in TERMINAL_STATUSES]
 
-        where = ["entropy >= %s", f"status <> ALL(%s)"]
+        where = ["entropy >= %s", "status <> ALL(%s)"]
         params: list[Any] = [min_entropy, terminal]
         if status is not None:
             where.append("status = %s")

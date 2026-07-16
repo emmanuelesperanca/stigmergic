@@ -117,26 +117,60 @@ def build_llm_complete(*, use_cache: bool = True) -> Callable[[str], str]:
     config = LLMConfig().require()
     client = _build_client(config)
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    # Side-channel token/cost accounting the caller can read after the run via
+    # ``complete.usage``. Keeping it off the return value preserves the plain
+    # ``complete(prompt) -> str`` contract that LLMJudge depends on.
+    usage = {
+        "model": config.model,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "api_calls": 0,
+        "cache_hits": 0,
+    }
 
     def complete(prompt: str) -> str:
         cache_file = _cache_path(config, prompt) if use_cache else None
         if cache_file is not None and cache_file.exists():
-            return json.loads(cache_file.read_text(encoding="utf-8"))["response"]
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
+            usage["prompt_tokens"] += int(cached.get("prompt_tokens", 0) or 0)
+            usage["completion_tokens"] += int(cached.get("completion_tokens", 0) or 0)
+            usage["cache_hits"] += 1
+            return cached["response"]
 
-        text = _call_with_retries(client, config, prompt)
+        text, prompt_tokens, completion_tokens = _call_with_retries(
+            client, config, prompt
+        )
+        usage["prompt_tokens"] += prompt_tokens
+        usage["completion_tokens"] += completion_tokens
+        usage["api_calls"] += 1
 
         if cache_file is not None:
             cache_file.write_text(
-                json.dumps({"prompt": prompt, "response": text}, ensure_ascii=False),
+                json.dumps(
+                    {
+                        "prompt": prompt,
+                        "response": text,
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                    },
+                    ensure_ascii=False,
+                ),
                 encoding="utf-8",
             )
         return text
 
+    complete.usage = usage  # type: ignore[attr-defined]
     return complete
 
 
-def _call_with_retries(client, config: LLMConfig, prompt: str, *, attempts: int = 3) -> str:
-    """Call the chat endpoint with a small exponential backoff."""
+def _call_with_retries(
+    client, config: LLMConfig, prompt: str, *, attempts: int = 3
+) -> tuple[str, int, int]:
+    """Call the chat endpoint with a small exponential backoff.
+
+    Returns ``(text, prompt_tokens, completion_tokens)``; token counts are ``0``
+    when the provider omits a ``usage`` block.
+    """
     last_exc: Exception | None = None
     for attempt in range(attempts):
         try:
@@ -154,7 +188,13 @@ def _call_with_retries(client, config: LLMConfig, prompt: str, *, attempts: int 
                     {"role": "user", "content": prompt},
                 ],
             )
-            return completion.choices[0].message.content or ""
+            text = completion.choices[0].message.content or ""
+            token_usage = getattr(completion, "usage", None)
+            prompt_tokens = int(getattr(token_usage, "prompt_tokens", 0) or 0)
+            completion_tokens = int(
+                getattr(token_usage, "completion_tokens", 0) or 0
+            )
+            return text, prompt_tokens, completion_tokens
         except Exception as exc:  # noqa: BLE001 - provider SDKs raise many types
             last_exc = exc
             if attempt < attempts - 1:

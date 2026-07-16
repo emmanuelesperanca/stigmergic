@@ -41,6 +41,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from stigmergic_ai.agents.base_ant import ConsumerAnt, Mutation, ProducerAnt
+from stigmergic_ai.agents.concrete import redact_pii
 from stigmergic_ai.agents.verifier_ant import VerifierAnt
 from stigmergic_ai.core.consensus import MockNLIJudge, NLIJudge, SemanticRaft
 from stigmergic_ai.core.environment import (
@@ -187,10 +188,15 @@ class ServiceNowIntakeAnt(ProducerAnt):
             raw = question
             if incident.description:
                 raw = f"{question}\n\n{incident.description}"
+            # Redact PII (emails/SSNs/cards/phones) BEFORE the durable write, so
+            # sensitive data never lands in the store, logs or event trail. The
+            # short description is assumed non-sensitive and kept verbatim as the
+            # retrieval key.
             self.env.inject_chaos(
                 raw,
                 entropy=Entropy.CHAOS,
                 status=Status.RAW,
+                redactor=redact_pii,
                 metadata={
                     "channel": "servicenow",
                     "sys_id": incident.sys_id,
@@ -361,10 +367,11 @@ class GardenerAnt(ConsumerAnt):
 
     * **Approved** -> :meth:`KnowledgeGround.add` the answer as a
       ``resolved-ticket`` (the garden *grows*), and Resolve the incident.
-    * **Rejected** -> optionally :meth:`KnowledgeGround.delete` the wrong entry
-      the answer came from, then plant the expert's authoritative answer as an
-      ``expert-correction`` (the garden *self-heals*), and Resolve the incident
-      with the corrected answer.
+    * **Rejected** -> :meth:`KnowledgeGround.quarantine` the wrong entry the
+      answer came from (kept on disk for audit and rollback, no longer served),
+      then plant the expert's authoritative answer as an ``expert-correction``
+      (the garden *self-heals*), and Resolve the incident with the corrected
+      answer.
 
     The human expert is the oracle (external judgment); this ant is only the
     gardener's hands that apply that judgment to the soil.
@@ -443,6 +450,8 @@ class GardenerAnt(ConsumerAnt):
             question,
             answer,
             source=KnowledgeSource.RESOLVED_TICKET,
+            confidence=0.8,
+            owner=metadata.get("reviewed_by", "system"),
             metadata={"incident": metadata.get("number")},
         )
         metadata["review"] = "approved"
@@ -455,13 +464,17 @@ class GardenerAnt(ConsumerAnt):
         decision: ExpertDecision,
         metadata: dict[str, Any],
     ) -> str:
-        """Tear out the wrong entry (if any) and plant the expert's answer."""
+        """Quarantine the wrong entry (if any) and plant the expert's answer."""
         metadata["review"] = "rejected"
-        removed = False
+        quarantined = False
         if decision.wrong_kb_id is not None:
-            removed = self.kb.delete(decision.wrong_kb_id)
-        metadata["kb_deleted"] = removed
-        metadata["kb_deleted_id"] = decision.wrong_kb_id if removed else None
+            quarantined = self.kb.quarantine(
+                decision.wrong_kb_id,
+                reason="expert-correction",
+                operator=decision.reviewer,
+            )
+        metadata["kb_quarantined"] = quarantined
+        metadata["kb_quarantined_id"] = decision.wrong_kb_id if quarantined else None
 
         expert_answer = decision.correct_answer or ""
         if expert_answer:
@@ -469,10 +482,12 @@ class GardenerAnt(ConsumerAnt):
                 question,
                 expert_answer,
                 source=KnowledgeSource.EXPERT_CORRECTION,
+                confidence=0.95,
+                owner=decision.reviewer,
                 metadata={"incident": metadata.get("number")},
             )
-            metadata["kb_write"] = "delete+add" if removed else "add"
+            metadata["kb_write"] = "quarantine+add" if quarantined else "add"
             metadata["kb_new_id"] = new_id
         else:
-            metadata["kb_write"] = "delete" if removed else "none"
+            metadata["kb_write"] = "quarantine" if quarantined else "none"
         return expert_answer or metadata.get("proposed_answer", "")

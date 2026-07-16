@@ -1,0 +1,162 @@
+# Continuous Integration for StigmergicAI.
+#
+# Five independent job groups enforce the project's promises on every push to
+# main and every pull request:
+#
+#   * test       -- the full pytest suite across Python 3.10-3.13 (+ a Windows
+#                   leg), kept torch-free so it mirrors the reproducible headline.
+#   * lint       -- flake8 with the repo's .flake8 (max-line-length = 300).
+#   * smoke      -- the runnable proofs: examples 01-03, the ServiceNow HR demo
+#                   (7 proofs), and the torch-free injection benchmark, on both
+#                   Ubuntu and Windows (the Windows leg guards the cp1252/UTF-8
+#                   stdout reconfigure path).
+#   * postgres   -- the ONLY place PostgresGround touches a real server: a
+#                   postgres:16 service container drives the live conformance
+#                   suite (SKIP LOCKED claims + LISTEN/NOTIFY wakeups).
+#   * cognition  -- installs the heavy [cognition] stack (torch/transformers) and
+#                   runs the suite plus the real-NLI benchmark. No API keys are
+#                   ever used in CI; the real-LLM path stays developer-driven.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Cancel superseded runs on the same ref so a rapid push sequence doesn't queue.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: the workflow only needs to read the checkout.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: tests (py${{ matrix.python-version }} · ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          # One Windows leg catches OS-specific regressions (path handling and
+          # the console encoding reconfigure) without doubling the whole matrix.
+          - os: windows-latest
+            python-version: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install (core + dev)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Run test suite (torch-free)
+        run: python -m pytest -q
+
+  lint:
+    name: lint (flake8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install flake8
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+      - name: Lint (max-line-length = 300, from .flake8)
+        run: flake8 .
+
+  smoke:
+    name: smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (editable)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+      - name: Example 01 — chaos monkey
+        run: python examples/01_hello_stigmergy.py
+      - name: Example 02 — byzantine fault
+        run: python examples/02_byzantine_fault.py
+      - name: Example 03 — latent telepathy
+        run: python examples/03_latent_telepathy.py
+      - name: ServiceNow HR demo — 7 proofs
+        run: python demos/servicenow_hr/demo.py
+      - name: Injection-capture benchmark — torch-free headline
+        run: python benchmarks/injection_capture/run.py
+
+  postgres:
+    name: postgres (live PostgresGround)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        # Throwaway credentials for an ephemeral CI container -- not a secret.
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: stigmergic_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      STIG_TEST_PG_DSN: postgresql://postgres:postgres@localhost:5432/stigmergic_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (dev + postgres)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,postgres]"
+      - name: PostgresGround conformance (SKIP LOCKED + LISTEN/NOTIFY)
+        run: python -m pytest tests/test_ground.py -q
+
+  cognition:
+    name: cognition (torch + real NLI)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install (dev + cognition + benchmark)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,cognition,benchmark]"
+      - name: Run full suite (torch installed — import hygiene still holds)
+        run: python -m pytest -q
+      - name: Real-NLI injection benchmark (downloads the cross-encoder)
+        run: python benchmarks/injection_capture/run.py --nli

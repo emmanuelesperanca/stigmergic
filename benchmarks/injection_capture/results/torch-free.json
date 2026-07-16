@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-28T22:26:24.496786+00:00",
+  "generated_at": "2026-07-16T14:04:05.003220+00:00",
   "mode": "torch-free",
   "slug": "torch-free",
   "dataset": "dataset.jsonl",
@@ -18,7 +18,15 @@
       "attacks": 56,
       "benign": 60,
       "capture_rate": 0.4464,
+      "capture_rate_ci95": [
+        0.3239,
+        0.5759
+      ],
       "false_positive_rate": 0.5,
+      "false_positive_rate_ci95": [
+        0.3773,
+        0.6227
+      ],
       "precision": 0.4545,
       "recall": 0.4464,
       "f1": 0.4505,
@@ -32,6 +40,10 @@
         "shell_injection": 0.6667,
         "sql_injection": 1.0,
         "system_prompt_leak": 1.0
+      },
+      "category_false_positive": {
+        "benign_lookalike": 1.0,
+        "benign_plain": 0.0
       }
     },
     {
@@ -45,7 +57,15 @@
       "attacks": 56,
       "benign": 60,
       "capture_rate": 0.8214,
+      "capture_rate_ci95": [
+        0.7016,
+        0.9
+      ],
       "false_positive_rate": 0.5,
+      "false_positive_rate_ci95": [
+        0.3773,
+        0.6227
+      ],
       "precision": 0.6053,
       "recall": 0.8214,
       "f1": 0.697,
@@ -59,6 +79,10 @@
         "shell_injection": 1.0,
         "sql_injection": 1.0,
         "system_prompt_leak": 1.0
+      },
+      "category_false_positive": {
+        "benign_lookalike": 1.0,
+        "benign_plain": 0.0
       }
     },
     {
@@ -72,7 +96,15 @@
       "attacks": 56,
       "benign": 60,
       "capture_rate": 0.8214,
+      "capture_rate_ci95": [
+        0.7016,
+        0.9
+      ],
       "false_positive_rate": 0.5,
+      "false_positive_rate_ci95": [
+        0.3773,
+        0.6227
+      ],
       "precision": 0.6053,
       "recall": 0.8214,
       "f1": 0.697,
@@ -86,6 +118,10 @@
         "shell_injection": 1.0,
         "sql_injection": 1.0,
         "system_prompt_leak": 1.0
+      },
+      "category_false_positive": {
+        "benign_lookalike": 1.0,
+        "benign_plain": 0.0
       }
     },
     {
@@ -99,7 +135,15 @@
       "attacks": 56,
       "benign": 60,
       "capture_rate": 0.8214,
+      "capture_rate_ci95": [
+        0.7016,
+        0.9
+      ],
       "false_positive_rate": 0.5,
+      "false_positive_rate_ci95": [
+        0.3773,
+        0.6227
+      ],
       "precision": 0.6053,
       "recall": 0.8214,
       "f1": 0.697,
@@ -113,6 +157,10 @@
         "shell_injection": 1.0,
         "sql_injection": 1.0,
         "system_prompt_leak": 1.0
+      },
+      "category_false_positive": {
+        "benign_lookalike": 1.0,
+        "benign_plain": 0.0
       }
     }
   ],

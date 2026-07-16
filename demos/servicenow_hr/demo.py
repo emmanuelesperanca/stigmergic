@@ -224,7 +224,8 @@ def print_wave_outcomes(
         )
         if ph is not None:
             print(f"      trail: {causal_trail(inspector, ph.id)}")
-            redacted = (ph.metadata or {}).get("pii_redacted")
+            meta = ph.metadata or {}
+            redacted = meta.get("pii_redacted_at_intake") or meta.get("pii_redacted")
             if redacted:
                 print(f"      pii redacted: {', '.join(redacted)}")
     print()
@@ -270,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     # 1. Seed the soil ---------------------------------------------------------
     embedder = build_embedder(args.embed)
     kb = KnowledgeGround(embedder, db_path=args.db)
-    seed_ids = ingest(kb, read_records(pathlib.Path(args.seed)))
+    ingest(kb, read_records(pathlib.Path(args.seed)))
     seed_count = kb.count()
     print(f"  Seeded {seed_count} HR knowledge entries with {embedder.name}.")
 
@@ -360,19 +361,24 @@ def main(argv: list[str] | None = None) -> int:
         "The knowledge base was never poisoned (no injection payload persisted).",
     )
 
-    # PII hygiene: the Governance ant scrubbed personal data out of the raw
-    # ticket before it could reach the proposal, the trail, or the soil.
+    # PII hygiene: the intake ant scrubbed personal data out of the raw ticket
+    # BEFORE the durable write, so it never reached the store, the proposal, the
+    # trail, or the soil.
     pii_number = wave1[0][2]
     pii_ph = pheromones_by_number(ground).get(pii_number)
     pii_meta = (pii_ph.metadata or {}) if pii_ph is not None else {}
-    pii_redacted = pii_meta.get("pii_redacted") or []
-    pii_leaked = (
-        "jane.doe@gmail.com" in repr(pii_meta) or "123-45-6789" in repr(pii_meta)
+    pii_redacted = (
+        pii_meta.get("pii_redacted_at_intake") or pii_meta.get("pii_redacted") or []
+    )
+    pii_raw = pii_ph.raw_data if pii_ph is not None else ""
+    pii_leaked = any(
+        secret in repr(pii_meta) or secret in pii_raw
+        for secret in ("jane.doe@gmail.com", "123-45-6789")
     )
     ok_pii = prove(
         bool(pii_redacted) and not pii_leaked,
-        f"PII in ticket {pii_number} was redacted "
-        f"({', '.join(pii_redacted) or 'none'}) before reaching the soil.",
+        f"PII in ticket {pii_number} was redacted at intake "
+        f"({', '.join(pii_redacted) or 'none'}) before ever reaching the store.",
     )
 
     # Learning: the base grew, and a follow-up now retrieves a resolved-ticket.
@@ -390,7 +396,8 @@ def main(argv: list[str] | None = None) -> int:
     # Correction: the wrong seed is gone; the expert's answer took its place.
     ok_deleted = prove(
         not _kb_has_answer_containing(kb, "5 paid vacation days"),
-        "The wrong '5 vacation days' seed was deleted from the soil.",
+        "The wrong '5 vacation days' seed was quarantined out of the served soil "
+        "(kept on disk for audit).",
     )
     corrected_hit = kb.best_match(WAVE_TWO[1].short)
     has_correction = any(

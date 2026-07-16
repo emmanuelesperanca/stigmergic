@@ -47,7 +47,11 @@ from ants import (  # noqa: E402
     approve_all_oracle,
 )
 from embeddings import StubEmbedder, cosine_similarity  # noqa: E402
-from knowledge_ground import KnowledgeGround, KnowledgeSource  # noqa: E402
+from knowledge_ground import (  # noqa: E402
+    KnowledgeGround,
+    KnowledgeSource,
+    KnowledgeStatus,
+)
 from mock_servicenow import (  # noqa: E402
     IncidentState,
     MockServiceNowClient,
@@ -174,6 +178,45 @@ def test_knowledge_ground_delete_and_replace() -> None:
         assert kb.delete(entry_id) is True
         assert kb.get(entry_id) is None
         assert kb.delete(entry_id) is False  # already gone
+
+
+def test_knowledge_ground_quarantine_excludes_from_retrieval_and_audits() -> None:
+    with fresh_kb() as kb:
+        entry_id = kb.add(
+            "How many vacation days do full-time employees receive?",
+            "Full-time employees receive 5 paid vacation days per year.",
+        )
+        assert kb.count() == 1
+
+        assert kb.quarantine(entry_id, reason="wrong", operator="alice") is True
+
+        # Quarantined: absent from active reads and retrieval, still on disk.
+        assert kb.count() == 0
+        assert kb.count(include_quarantined=True) == 1
+        assert kb.all() == []
+        assert kb.search("vacation days", k=5) == []
+        assert kb.get(entry_id) is not None
+
+        # The lifecycle is auditable and reversible.
+        audit = kb.get_audit_log(entry_id)
+        assert [a["operation"] for a in audit] == ["add", "quarantine"]
+        assert kb.restore(entry_id, operator="alice") is True
+        assert kb.count() == 1
+        assert kb.best_match("vacation days") is not None
+
+
+def test_knowledge_ground_rollback_restores_prior_answer() -> None:
+    with fresh_kb() as kb:
+        entry_id = kb.add("q", "first answer")
+        assert kb.replace(entry_id, "second answer") is True
+        assert kb.get(entry_id).answer == "second answer"
+        assert kb.get(entry_id).version == 2
+
+        assert kb.rollback(entry_id) is True
+        restored = kb.get(entry_id)
+        assert restored.answer == "first answer"
+        assert restored.version == 3  # a rollback is itself a new version
+        assert any(a["operation"] == "rollback" for a in kb.get_audit_log(entry_id))
 
 
 def test_knowledge_ground_search_respects_k_and_empty_floor() -> None:
@@ -304,6 +347,27 @@ def test_intake_ant_injects_pheromone_and_marks_in_progress() -> None:
         # The incident is flipped out of NEW so it can never be ingested twice.
         assert client.get(inc.sys_id).state is IncidentState.IN_PROGRESS
         assert client.list_incidents(state=IncidentState.NEW) == []
+
+
+def test_intake_redacts_pii_before_persistence() -> None:
+    with PheromoneGround(":memory:") as ground:
+        client = MockServiceNowClient()
+        client.create_incident(
+            "Update my direct deposit",
+            description="My email is jane.doe@corp.com and my SSN is 123-45-6789.",
+        )
+        intake = ServiceNowIntakeAnt(ground, client, "intake")
+
+        intake.secrete()
+
+        raw = ground.sense(status=Status.RAW)
+        assert len(raw) == 1
+        ph = raw[0]
+        # PII is gone from the payload the instant it hits the durable store...
+        assert "jane.doe@corp.com" not in ph.raw_data
+        assert "123-45-6789" not in ph.raw_data
+        # ...and the categories are recorded for audit at intake time.
+        assert set(ph.metadata["pii_redacted_at_intake"]) == {"email", "ssn"}
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +535,7 @@ def test_gardener_approve_learns_new_entry_and_resolves() -> None:
         assert client.get(inc.sys_id).state is IncidentState.RESOLVED
 
 
-def test_gardener_reject_deletes_wrong_entry_and_heals() -> None:
+def test_gardener_reject_quarantines_wrong_entry_and_heals() -> None:
     with fresh_kb() as kb, PheromoneGround(":memory:") as ground:
         client = MockServiceNowClient()
         inc = client.create_incident("vacation days")
@@ -503,8 +567,16 @@ def test_gardener_reject_deletes_wrong_entry_and_heals() -> None:
         mutation = human.metabolize(task)
 
         assert mutation.new_status is Status.RESOLVED
-        # The wrong seed is torn out and replaced with the expert's answer.
-        assert kb.get(wrong_id) is None
+        # The wrong seed is quarantined (kept on disk for audit), not erased...
+        wrong = kb.get(wrong_id)
+        assert wrong is not None and wrong.status == KnowledgeStatus.QUARANTINE
+        # ...so it is no longer served by retrieval or counted in the active soil.
+        assert all(e.id != wrong_id for e in kb.all())
+        # ...and the quarantine is recorded in the immutable audit trail.
+        assert any(
+            a["operation"] == "quarantine" for a in kb.get_audit_log(wrong_id)
+        )
+        # The expert's authoritative answer took its place.
         corrections = [
             e for e in kb.all() if e.source == KnowledgeSource.EXPERT_CORRECTION
         ]
@@ -566,12 +638,12 @@ def test_pipeline_scrubs_pii_before_writeback() -> None:
         ph = _only(ground)
         assert ph.status is Status.RESOLVED
         assert client.get(inc.sys_id).state is IncidentState.RESOLVED
-        # PII is scrubbed at the hygiene checkpoint and never propagates into
-        # the pheromone (payload, premise, or proposal)...
+        # PII is scrubbed at intake, before the durable write, and never
+        # propagates into the pheromone (payload, premise, or proposal)...
         assert "jane.doe@corp.com" not in ph.raw_data
         assert "jane.doe@corp.com" not in repr(ph.metadata)
         assert "123-45-6789" not in repr(ph.metadata)
-        assert set(ph.metadata["pii_redacted"]) == {"email", "ssn"}
+        assert set(ph.metadata["pii_redacted_at_intake"]) == {"email", "ssn"}
         # ...nor into the durable soil.
         for entry in kb.all():
             assert "jane.doe@corp.com" not in entry.question
@@ -605,8 +677,11 @@ def test_pipeline_self_heals_a_wrong_seed() -> None:
         drive(ground, intake, gov, solver, verifier, human)
 
         assert client.get(inc.sys_id).state is IncidentState.RESOLVED
-        # The flawed seed is gone; a corrected answer sits in its place.
-        assert kb.get(wrong_id) is None
+        # The flawed seed is quarantined (no longer served), a corrected answer
+        # sits in its place, and the quarantine is on the audit trail.
+        assert kb.get(wrong_id).status == KnowledgeStatus.QUARANTINE
+        assert all(e.id != wrong_id for e in kb.all())
+        assert any(a["operation"] == "quarantine" for a in kb.get_audit_log(wrong_id))
         healed = kb.best_match(
             "paid vacation days full-time employees per year"
         )
