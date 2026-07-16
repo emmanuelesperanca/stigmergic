@@ -91,6 +91,16 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Disable the on-disk LLM response cache (only affects --llm).",
     )
     parser.add_argument(
+        "--baselines",
+        action="store_true",
+        help="Also score external baselines (Guardrails AI / NeMo); needs [baselines].",
+    )
+    parser.add_argument(
+        "--nemo-config",
+        default=None,
+        help="Path to a NeMo Guardrails config dir (adds the NeMo baseline).",
+    )
+    parser.add_argument(
         "--quiet", action="store_true", help="Suppress the console summary table."
     )
     return parser.parse_args(argv)
@@ -103,6 +113,8 @@ def _mode_label(args: argparse.Namespace) -> str:
     bits = ["real-NLI" if args.nli else "torch-free"]
     if args.llm:
         bits.append("real-LLM")
+    if getattr(args, "baselines", False):
+        bits.append("baselines")
     return " + ".join(bits)
 
 
@@ -113,6 +125,8 @@ def _mode_slug(args: argparse.Namespace) -> str:
     slug = "real-nli" if args.nli else "torch-free"
     if args.llm:
         slug += "+real-llm"
+    if getattr(args, "baselines", False):
+        slug += "+baselines"
     return slug
 
 
@@ -627,6 +641,16 @@ def main(argv: list[str] | None = None) -> int:
         defenses = build_defenses(
             use_nli=args.nli, nli_model=args.nli_model, llm_complete=llm_complete
         )
+        if args.baselines:
+            from baselines import build_baseline_defenses
+
+            try:
+                defenses = list(defenses) + build_baseline_defenses(
+                    nemo_config=args.nemo_config
+                )
+            except RuntimeError as exc:
+                print(f"--baselines could not run:\n{exc}", file=sys.stderr)
+                return 2
 
     all_metrics, per_item_records = _run_defenses(defenses, items)
 
@@ -677,7 +701,7 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
         primary_md = BYZANTINE_MD
-    elif not args.nli and not args.llm:
+    elif not args.nli and not args.llm and not args.baselines:
         # Only the canonical, fully-reproducible torch-free run owns RESULTS.md
         # and results.json -- the committed headline the README points to. The
         # model/provider-dependent modes (--nli, --llm) live in their per-mode

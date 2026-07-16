@@ -63,6 +63,14 @@ postgres = [
 benchmark = [
     "openai>=1.0",
 ]
+# External guardrail baselines scored side-by-side with the quorum on the same
+# corpus (benchmarks/injection_capture/baselines.py). Only needed for:
+#   python benchmarks/injection_capture/run.py --baselines
+# Install with: pip install -e ".[baselines]"
+baselines = [
+    "guardrails-ai>=0.5",
+    "nemoguardrails>=0.9",
+]
 dev = [
     "pytest>=7.0",
 ]

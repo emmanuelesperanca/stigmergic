@@ -257,6 +257,7 @@ StigmergicAI targets a security-sensitive category, so it is designed to be *mea
 | :--- | :--- | :--- |
 | Prompt-injection capture (internal) | OWASP `LLM01` · [`benchmarks/injection_capture`](benchmarks/injection_capture/RESULTS.md) | ✅ measured (torch-free) |
 | Byzantine robustness (internal) | consensus under a faulty juror · [`BYZANTINE.md`](benchmarks/injection_capture/BYZANTINE.md) | ✅ measured (torch-free) |
+| Baseline comparison (external tools) | Guardrails AI · NeMo Guardrails · [`baselines.py`](benchmarks/injection_capture/baselines.py) | 🔌 adapter ready (`run.py --baselines`) |
 | Prompt-injection capture (external) | [AgentDojo](https://github.com/ethz-spylab/agentdojo), [InjecAgent](https://github.com/uiuc-kang-lab/InjecAgent) | 🚧 planned |
 | Answer faithfulness (RAG) | [RAGAS](https://github.com/explodinggradients/ragas) | 🚧 planned |
 | Throughput & self-healing | event-driven vs. polling · Chaos-Monkey drain | ✅ demonstrated in examples |
@@ -267,7 +268,7 @@ StigmergicAI targets a security-sensitive category, so it is designed to be *mea
 
 **Why a *quorum* and not one judge (reproducible, torch-free).** The aggregate above hides what consensus is *for*, because there every juror is honest. The [Byzantine experiment](benchmarks/injection_capture/BYZANTINE.md) plants one faulty juror: a single compromised judge that approves everything **collapses to 0% capture**, yet the *same* traitor inside a 3-node quorum still **holds at 97.6%** (two honest votes reach the 2-of-3 threshold). Symmetrically, a broken juror that rejects everything drives a lone judge to a **100% false-positive rate**, while the quorum is outvoted back down to **33.3%**. A lone model is a single point of failure in both directions; an uncorrelated quorum is not. Reproduce with `python benchmarks/injection_capture/run.py --byzantine`; every mode is archived side by side in [`COMPARISON.md`](benchmarks/injection_capture/COMPARISON.md).
 
-> Honesty first: the committed headline is the **torch-free, fully reproducible** configuration. The external suites (AgentDojo, InjecAgent, RAGAS) and the Guardrails/NeMo baselines are a published roadmap — they plug into the same harness as additional scored `Defense` configs. Throughput and self-healing are demonstrated by the runnable examples today.
+> Honesty first: the committed headline is the **torch-free, fully reproducible** configuration. The **Guardrails AI and NeMo Guardrails baselines are runnable adapters** — `pip install -e ".[baselines]"` and add `--baselines` to score them on the identical corpus (their numbers depend on the tool's own model/config, so they live in [`COMPARISON.md`](benchmarks/injection_capture/COMPARISON.md), not the committed headline). The public attack suites (AgentDojo, InjecAgent, RAGAS) remain a roadmap and plug into the same scored `Defense` harness. Throughput and self-healing are demonstrated by the runnable examples today.
 
 ---
 
