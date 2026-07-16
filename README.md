@@ -219,7 +219,7 @@ pip install pytest
 python -m pytest -q
 ```
 
-> **83 tests**, all torch-free and sub-second, span three suites: `test_consensus.py` (quorum arithmetic — 2-of-3 passes, 1-of-3 slashes — red-flag slashing, crashing-juror resilience, heterogeneous panels), `test_ground.py` (event emission, event-driven wake, the pluggable-backend factory, SQL-injection-safe identifiers), and `test_observability.py` (lifecycle, entropy sparkline, replay, JSONL sink). Import hygiene is asserted: no `torch`, `transformers`, or `psycopg` ever leaks into a core run.
+> **158 tests**, torch-free and sub-second (8 are gated on the optional Postgres/cognition extras and skip by default), span five suites: `test_consensus.py` (quorum arithmetic — 2-of-3 passes, 1-of-3 slashes — red-flag slashing, crashing-juror resilience, heterogeneous panels), `test_ground.py` (event emission, event-driven wake, the pluggable-backend factory, SQL-injection-safe identifiers, and the **reliability core**: work-leases + reclaim, optimistic-concurrency CAS, idempotency, and the dead-letter queue), `test_observability.py` (lifecycle, entropy sparkline, replay, JSONL sink), `test_benchmark.py` (injection-capture metrics, Wilson confidence intervals, and the Byzantine experiment), and `test_servicenow_hr.py` (the end-to-end ServiceNow HR demo — learning, self-healing, PII scrubbing, injection defense). Import hygiene is asserted: no `torch`, `transformers`, or `psycopg` ever leaks into a core run.
 
 ---
 
@@ -239,7 +239,8 @@ src/stigmergic_ai/
     ├── verifier_ant.py    # VerifierAnt (the white blood cell)
     └── hybrid_ant.py      # HybridSolverAnt (cloud text / local latent)
 examples/   # runnable horizon demos
-tests/      # torch-free suites: consensus · ground · observability
+demos/      # end-to-end showcase: servicenow_hr (learn · self-heal · scrub PII · resist injection)
+tests/      # torch-free suites: consensus · ground (+ reliability) · observability · benchmark · servicenow_hr
 ```
 
 ---
