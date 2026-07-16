@@ -249,7 +249,7 @@ tests/      # torch-free suites: consensus · ground (+ reliability) · observab
 
 StigmergicAI targets a security-sensitive category, so it is designed to be *measured against recognized standards* rather than to rest on self-asserted claims.
 
-**Threat model — mapped to the [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/).** The Byzantine quorum directly targets `LLM01: Prompt Injection` and `LLM09: Overreliance` (hallucination): no single model commits state, and every verdict carries a durable, replayable audit record (`ConsensusVerdict`).
+**Threat model — mapped to the [OWASP Top 10 for LLM Applications](https://owasp.org/www-project-top-10-for-large-language-model-applications/).** The Byzantine quorum directly targets `LLM01: Prompt Injection` and `LLM09: Overreliance` (hallucination): no single model commits state, and every verdict carries a durable, replayable audit record (`ConsensusVerdict`). The full mapping — every OWASP risk to the control that answers it, plus the honest limitations — is in [`THREAT_MODEL.md`](THREAT_MODEL.md).
 
 **Benchmark methodology.** Two layers: a reproducible **internal harness** that measures the quorum directly, plus the public suites the field already trusts for external validation.
 
@@ -281,6 +281,15 @@ StigmergicAI targets a security-sensitive category, so it is designed to be *mea
 | **State persistence** | App memory (volatile) | Database physics (durable) | Pheromones in soil |
 
 Commercial frameworks model a **corporation**. StigmergicAI models an **organism**. Organisms are older, and they don't go down when the manager quits.
+
+## 📚 Documentation
+
+Beyond this README, three documents specify the engineering contract in operational (not metaphorical) language:
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — the abstractions, ports & adapters, execution semantics, the four trust boundaries, and the invariants the runtime holds.
+- [`STATE_MACHINE.md`](STATE_MACHINE.md) — the formal `Pheromone` lifecycle: every legal state and transition, who drives it, and how the reliability core overlays it.
+- [`THREAT_MODEL.md`](THREAT_MODEL.md) — the OWASP LLM Top-10 mapping, the distributed-systems failure modes, and the residual limitations, stated plainly.
+- [`POSITIONING.md`](POSITIONING.md) — category, beachhead, and open-core strategy.
 
 ## 🤝 Contributing
 This is an experimental research project pushing the boundaries of Distributed Cognitive Systems. We welcome PRs for new Byzantine voting mechanisms, new `AbstractGround` backends (Redis, DynamoDB), Swarm Inspector visualizations, and Latent Transfer utilities. New organs for the organism are always welcome.
