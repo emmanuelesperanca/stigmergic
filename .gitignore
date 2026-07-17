@@ -234,8 +234,12 @@ swarm.db
 # on disk for reproducibility and cost. It is machine-local, not source.
 benchmarks/**/.cache/
 
-# Draft of the Medium blog post -- unpublished writing, not shipped with the code.
+# Draft of the Medium blog posts + marketing artifacts -- unpublished writing,
+# not shipped with the code.
 medium_post
+medium_post_2.md
+video_script.md
+show_hn.md
 
 # Local interactive visualization (didactic swarm animation for demos/videos).
 # Generated from a real SwarmInspector run; not part of the shipped package.

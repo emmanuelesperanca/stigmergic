@@ -1,0 +1,26 @@
+# Local pgvector for testing the RDS/HR demo end-to-end without touching your RDS.
+#
+#   docker compose -f demos/rds_hr/docker-compose.yml up -d
+#   # the two SQL files in ./sql run automatically on first boot, in order:
+#   #   00_knowledge_corporate.sql  (your table, reproduced for local testing)
+#   #   01_hr_tickets.sql           (the intake table)
+#
+# Then point the demo at it:
+#   $env:STIG_PG_DSN = "postgresql://stig:stig@localhost:5432/stigdemo"
+#   python demos/rds_hr/seed_knowledge.py
+#   python demos/rds_hr/run_poc.py --reset
+#
+# Against your real RDS you do NOT need this file: the tables already exist; just
+# apply 01_hr_tickets.sql once and set STIG_PG_DSN to the RDS connection string.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: stig
+      POSTGRES_PASSWORD: stig
+      POSTGRES_DB: stigdemo
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./sql:/docker-entrypoint-initdb.d:ro
